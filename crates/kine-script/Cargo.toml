@@ -1,0 +1,17 @@
+[package]
+name = "kine-script"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kine-core.workspace = true
+rquickjs.workspace = true
+oxc = { version = "0.153", features = ["codegen", "semantic", "transformer"] }
+serde.workspace = true
+serde_json.workspace = true
+taffy.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+kine-render.workspace = true

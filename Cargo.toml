@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kine-core",
+    "crates/kine-text",
+    "crates/kine-shader",
+    "crates/kine-encode",
+    "crates/kine-audio",
+    "crates/kine-render",
+    "crates/kine-script",
+    "crates/kine-mux",
+    "crates/kine-platform",
+    "crates/kine-server",
+    "crates/kine-cli",
+    "crates/kine-android",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/sysv86/kine"
+rust-version = "1.98"
+
+[workspace.dependencies]
+kine-core = { path = "crates/kine-core" }
+kine-text = { path = "crates/kine-text" }
+kine-shader = { path = "crates/kine-shader" }
+kine-encode = { path = "crates/kine-encode" }
+kine-audio = { path = "crates/kine-audio" }
+kine-render = { path = "crates/kine-render" }
+kine-script = { path = "crates/kine-script" }
+kine-mux = { path = "crates/kine-mux" }
+kine-platform = { path = "crates/kine-platform" }
+kine-server = { path = "crates/kine-server" }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+taffy = { version = "0.14", features = ["serde"] }
+cosmic-text = "0.19"
+vello = "0.11"
+vello_gpu = "0.3"
+wgpu = "30"
+naga = { version = "30", features = ["wgsl-in"] }
+pollster = "0.4"
+flacenc = "0.5"
+symphonia = { version = "0.6", features = ["all"] }
+rubato = "5"
+hound = "3.5"
+vello_cpu = "0.3"
+rquickjs = { version = "0.14", features = ["macro"] }
+oxc = "0.153"
+muxfin = "0.5"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Hardware video coding. Taken from upstream `master` rather than the published
+# 0.4.0 because 0.4.0 is still pinned to wgpu 29, while upstream has moved to
+# wgpu 30 — the same major as our rasterizer. Sharing that major is exactly what
+# makes a rendered texture acceptable to the encoder without a host round trip,
+# so this is a correctness pin, not a preference.
+gpu-video = { git = "https://github.com/software-mansion/smelter", default-features = false, features = ["wgpu"] }

@@ -1,0 +1,12 @@
+[package]
+name = "kine-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kine-core.workspace = true
+cosmic-text.workspace = true
+fontdb = { version = "0.23", default-features = false, features = ["std"] }
+serde.workspace = true
+thiserror.workspace = true

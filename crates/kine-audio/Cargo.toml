@@ -1,0 +1,13 @@
+[package]
+name = "kine-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+symphonia.workspace = true
+rubato.workspace = true
+flacenc.workspace = true
+hound.workspace = true

@@ -1,0 +1,30 @@
+[package]
+name = "kine-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kine"
+path = "src/main.rs"
+
+[dependencies]
+kine-core.workspace = true
+kine-render.workspace = true
+kine-mux.workspace = true
+kine-platform.workspace = true
+kine-script.workspace = true
+kine-shader.workspace = true
+kine-audio.workspace = true
+kine-server.workspace = true
+serde_json.workspace = true
+taffy.workspace = true
+
+[features]
+default = []
+# Hardware H.264 encode (Vulkan Video) in addition to the software AV1 path.
+hwencode = ["kine-server/hwencode"]
+gpu = ["kine-server/gpu"]
+# The closed loop: GPU-rasterized texture handed to the hardware encoder with no
+# readback (needs both `gpu` and `hwencode`).
+zero-copy = ["kine-server/zero-copy"]

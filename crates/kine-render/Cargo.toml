@@ -1,0 +1,35 @@
+[package]
+name = "kine-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kine-core.workspace = true
+kine-text.workspace = true
+kine-shader.workspace = true
+vello_cpu.workspace = true
+vello = { workspace = true, optional = true }
+vello_gpu = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+glifo = { version = "0.4", optional = true }
+naga = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+default = []
+# The GPU path: Vello GPU scene rasterization plus agent-authored WGSL passes.
+gpu = [
+    "dep:vello_gpu",
+    "dep:wgpu",
+    "dep:glifo",
+    "dep:naga",
+    "dep:pollster",
+]
+
+[dev-dependencies]
+taffy.workspace = true

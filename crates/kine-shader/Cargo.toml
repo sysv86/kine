@@ -1,0 +1,11 @@
+[package]
+name = "kine-shader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
