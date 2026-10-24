@@ -1,26 +1,50 @@
 # Kine
 
 A Rust engine for programmatic synthesis and processing of video, graphics and
-audio. It takes a scene description in TypeScript or JSON, computes layout,
-shapes text, rasterizes frames (CPU or GPU), executes WGSL shaders, processes
-audio and packs the result into output containers.
+audio on **Linux** and **macOS**. It takes a scene description in TypeScript or
+JSON, computes layout, shapes text, rasterizes frames (CPU or GPU), executes
+WGSL shaders, processes audio and packs the result into output containers.
+
+## Supported platforms & zero-bloat architecture
+
+Kine targets **Linux** (`x86_64`, `aarch64`) and **macOS** (`aarch64` Apple
+Silicon, `x86_64`).
+
+To keep macOS maintenance effortless even when developing and testing primarily
+on Linux:
+
+1. **100% OS-agnostic core pipeline** — Layout (`taffy`), deterministic text
+   shaping (`cosmic-text` with an isolated font database), CPU rasterization
+   (`vello_cpu`), multithreaded CPU WGSL shader evaluation (`naga` AST VM),
+   software AV1 video encoding (`rav1e`), audio synthesis/DSP/mixing
+   (`symphonia`, `rubato`, `flacenc`, `hound`) and MP4/MKV/WebM muxing are pure
+   Rust with zero OS-specific branches. Any test passing on Linux exercises the
+   exact same code paths that run on macOS.
+2. **Unified `wgpu` / `gpu-video` abstraction** — When optional GPU features are
+   enabled, `wgpu` automatically selects **Vulkan** on Linux and **Metal** on
+   macOS, while `gpu-video` selects **Vulkan Video** on Linux and
+   **VideoToolbox** on macOS.
+3. **Injectable host facts (`kine-platform`)** — OS classification, backend
+   reporting, and output path resolution are driven by a pure `Facts` struct,
+   allowing Linux unit tests to deterministically verify both Linux and macOS
+   behavior without a physical Mac, backed by GitHub Actions CI (`ubuntu-latest`
+   and `macos-14`).
 
 ## Workspace layout
 
-The Cargo workspace is split into 12 crates:
+The Cargo workspace is split into 11 crates:
 
 * `crates/kine-core` — scene graph (`Scene`, `Node`, `NodeKind`), Flexbox layout through `taffy`, keyframes, easing curves (`Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `CubicBezier`, `Steps`) and an analytical spring solver (`Spring`).
 * `crates/kine-text` — deterministic text shaping on `cosmic-text` (`harfrust`) with an isolated font database.
 * `crates/kine-shader` — parsing, validation and reflection of WGSL fragment shaders via `naga`, `std140` uniform packing by reflected offsets, built-in presets (`presets.rs`) and a multithreaded software WGSL interpreter for the CPU path (`vm.rs`).
-* `crates/kine-render` — scene rasterization through `vello_cpu` (CPU) and `vello_gpu` + `wgpu` (GPU), decoding and caching of input video (`video_io.rs`), export of raster and vector formats (`formats.rs`).
+* `crates/kine-render` — scene rasterization through `vello_cpu` (CPU) and `vello_gpu` + `wgpu` (GPU: Vulkan on Linux, Metal on macOS), decoding and caching of input video (`video_io.rs`), export of raster and vector formats (`formats.rs`).
 * `crates/kine-encode` — RGBA ↔ YUV BT.709 limited-range conversion (`I420`, `NV12`, `I444`), a software AV1 encoder (`rav1e`), `YUV4MPEG2` (`.y4m`) stream I/O, raw streams (`.rgba`, `.yuv`, `.nv12`) and the indexed `.kvid` container.
-* `crates/kine-mux` — muxing video (`AV1`, `H.264`) and audio (`FLAC`) into `MP4` (`muxfin`), `Matroska` (`.mkv`) and `WebM` (`.webm`), plus hardware H.264 encoding through Vulkan Video (`hwencode.rs`).
+* `crates/kine-mux` — muxing video (`AV1`, `H.264`) and audio (`FLAC`) into `MP4` (`muxfin`), `Matroska` (`.mkv`) and `WebM` (`.webm`), plus hardware H.264 encoding (`hwencode.rs` via Vulkan Video on Linux and VideoToolbox on macOS).
 * `crates/kine-audio` — decoding (`WAV`, `AIFF`, `FLAC`, `MP3`, `OGG`), procedural synthesis (`synth.rs`), polyphase resampling (`rubato`), a parametric biquad equalizer, a dynamics compressor, automatic sidechain ducking (`dsp.rs`), mixing (`mix.rs`) and writing `WAV`, `AIFF`, `FLAC`.
 * `crates/kine-script` — TypeScript to JavaScript transpilation with `oxc`, execution in `QuickJS` (`rquickjs`), building a `Scene` from the declarative description and emitting the `kine.d.ts` declaration file.
-* `crates/kine-platform` — run-environment detection (Linux, Android through `proot`, native Android) and file-write policy.
+* `crates/kine-platform` — host environment detection (Linux, macOS), graphics/video backend reporting and file-write policy.
 * `crates/kine-server` — high-level engine API (`Engine`), the video pipeline (`video.rs`), the static scene analyzer (`inspect`), per-pixel comparison (`snapshot_diff`) and a JSON-RPC 2.0 TCP server (`rpc.rs`).
 * `crates/kine-cli` — the `kine` command-line interface.
-* `crates/kine-android` — JNI bridge (`cdylib`) for calling the engine from Android applications.
 
 ## Build features
 
@@ -28,17 +52,12 @@ The CLI builds CPU-only by default. GPU rasterization, hardware encoding and the
 GPU-to-encoder zero-copy path are feature-gated:
 
 ```sh
-cargo build --release -p kine-cli                      # CPU rasterizer + software AV1
-cargo build --release -p kine-cli --features gpu       # vello_gpu / wgpu rasterizer
-cargo build --release -p kine-cli --features hwencode  # Vulkan Video H.264 encoder
-cargo build --release -p kine-cli --features zero-copy # GPU texture handed to the encoder
+cargo build --release -p kine-cli                      # CPU rasterizer + software AV1 (Linux & macOS)
+cargo build --release -p kine-cli --features gpu       # vello_gpu / wgpu (Vulkan on Linux, Metal on macOS)
+cargo build --release -p kine-cli --features hwencode  # Hardware H.264 encoder (Vulkan Video / VideoToolbox)
+cargo build --release -p kine-cli --features zero-copy # GPU texture handed to the hardware encoder
                                                        # without a host round trip
 ```
-
-GPU paths require a Vulkan driver. On hybrid laptops the encoder prefers the
-discrete adapter; `gpu-video` is taken from the upstream `smelter` master rather
-than the published 0.4.0 because that release still pins `wgpu` 29 while the
-rasterizer is on `wgpu` 30.
 
 ## Video, image and audio input and output
 
@@ -237,12 +256,17 @@ The server accepts newline-delimited (`\n`) JSON-RPC 2.0 messages:
 * `snapshot` — per-pixel comparison against a golden PNG.
 * `timeline` — summary of nodes, animations, video inputs and audio tracks in the scene.
 
-## Testing
+## Testing & CI/CD
 
 ```sh
-cargo test --workspace                     # default features
+cargo test --workspace                     # default features (Linux & macOS)
 cargo test --workspace --all-features      # adds the GPU and hardware-encoder paths
+bash scripts/ci-smoke.sh                   # end-to-end CLI smoke test
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs formatting, `clippy`, unit and
+integration tests, and `scripts/ci-smoke.sh` on both `ubuntu-latest` (Linux
+`x86_64`) and `macos-14` (macOS Apple Silicon `aarch64`).
 
 ## License
 

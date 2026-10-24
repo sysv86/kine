@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  linux:
+    name: Linux (Ubuntu x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint workspace (default features)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Lint workspace (all features: gpu + hwencode + zero-copy)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run unit & integration tests (default features)
+        run: cargo test --workspace
+
+      - name: Run unit & integration tests (all features)
+        run: cargo test --workspace --all-features
+
+      - name: End-to-end CLI smoke test
+        run: bash scripts/ci-smoke.sh
+
+  macos:
+    name: macOS (Apple Silicon aarch64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Lint workspace (default + gpu features)
+        run: cargo clippy --workspace --all-targets --features gpu -- -D warnings
+
+      - name: Check hardware encode compilation (VideoToolbox + Metal)
+        run: cargo check --workspace --all-features
+
+      - name: Run unit & integration tests (default features)
+        run: cargo test --workspace
+
+      - name: Run unit & integration tests (gpu feature on Metal)
+        run: cargo test --workspace --features gpu
+
+      - name: End-to-end CLI smoke test
+        run: bash scripts/ci-smoke.sh
