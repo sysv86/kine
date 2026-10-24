@@ -6,9 +6,9 @@
 
 #[cfg(feature = "xilem-ui")]
 use xilem::{
-    masonry::parley::style::FontWeight,
+    masonry::{core::ArcStr, parley::style::FontWeight},
     style::Style as _,
-    view::{flex_row, label, sized_box, text_button, CrossAxisAlignment},
+    view::{button, flex_row, label, sized_box, CrossAxisAlignment},
     Color, WidgetView,
 };
 
@@ -133,11 +133,6 @@ where
     State: 'static,
     F: Fn(&mut State) + Send + Sync + 'static,
 {
-    let text_str = if is_active {
-        format!("● {title}")
-    } else {
-        title.to_string()
-    };
     let bg = if is_active {
         pal.accent_mint_wash
     } else {
@@ -148,11 +143,28 @@ where
     } else {
         pal.border_hairline
     };
-    sized_box(text_button(text_str, on_click))
-        .padding(2.0)
-        .background_color(bg)
-        .border(border, 1.0)
-        .corner_radius(6.0)
+    let fg = if is_active {
+        pal.accent_mint
+    } else {
+        pal.text_secondary
+    };
+    let marker = if is_active {
+        "radio_button_checked"
+    } else {
+        "radio_button_unchecked"
+    };
+    sized_box(button(
+        flex_row((
+            icon::<State>(marker, 12.0, fg),
+            label(title.to_string()).text_size(12.0).color(fg),
+        ))
+        .cross_axis_alignment(CrossAxisAlignment::Center),
+        on_click,
+    ))
+    .padding(2.0)
+    .background_color(bg)
+    .border(border, 1.0)
+    .corner_radius(6.0)
 }
 
 /// Build a compact semantic badge chip (`TEXT`, `RECT`, `SHDR`, `VID`, `AUD`).
@@ -197,15 +209,30 @@ where
     State: 'static,
     F: Fn(&mut State) + Send + Sync + 'static,
 {
-    let chevron = if is_open { "▾" } else { "▸" };
-    let btn_label = format!("{chevron} {title}");
+    let chevron = if is_open {
+        "expand_more"
+    } else {
+        "chevron_right"
+    };
+    let fg = if is_open {
+        pal.accent_mint
+    } else {
+        pal.text_secondary
+    };
     let bg = if is_open {
         pal.bg_raised
     } else {
         pal.bg_surface
     };
     flex_row((
-        text_button(btn_label, on_toggle),
+        button(
+            flex_row((
+                icon::<State>(chevron, 14.0, fg),
+                label(title.to_string()).text_size(12.0).color(fg),
+            ))
+            .cross_axis_alignment(CrossAxisAlignment::Center),
+            on_toggle,
+        ),
         label(summary.to_string())
             .text_size(11.0)
             .color(if is_open {
@@ -240,6 +267,76 @@ where
     .expand()
     .padding(3.0)
     .background_color(pal.bg_shell)
+}
+
+/// Family name of the bundled Google **Material Symbols Outlined** variable font.
+pub const ICON_FONT: &str = "Material Symbols Outlined";
+
+/// A single Material Symbols icon rendered through the bundled icon font.
+pub fn icon<State>(
+    name: &'static str,
+    size: f32,
+    color: Color,
+) -> impl WidgetView<State> + use<State>
+where
+    State: 'static,
+{
+    label(name).font(ICON_FONT).text_size(size).color(color)
+}
+
+/// An icon-only button.
+pub fn icon_button<State, F>(
+    name: &'static str,
+    size: f32,
+    color: Color,
+    on_click: F,
+) -> impl WidgetView<State> + use<State, F>
+where
+    State: 'static,
+    F: Fn(&mut State) + Send + Sync + 'static,
+{
+    button(icon::<State>(name, size, color), on_click)
+}
+
+/// A button with a Material Symbols icon followed by a text label.
+pub fn icon_text_button<State, F, T>(
+    name: &'static str,
+    text: T,
+    icon_size: f32,
+    color: Color,
+    on_click: F,
+) -> impl WidgetView<State> + use<State, F, T>
+where
+    State: 'static,
+    F: Fn(&mut State) + Send + Sync + 'static,
+    T: Into<ArcStr>,
+{
+    button(
+        flex_row((
+            icon::<State>(name, icon_size, color),
+            label(text).text_size(12.0).color(color),
+        ))
+        .cross_axis_alignment(CrossAxisAlignment::Center),
+        on_click,
+    )
+}
+
+/// A non-interactive icon + text row.
+pub fn icon_text<State, T>(
+    name: &'static str,
+    text: T,
+    icon_size: f32,
+    color: Color,
+) -> impl WidgetView<State> + use<State, T>
+where
+    State: 'static,
+    T: Into<ArcStr>,
+{
+    flex_row((
+        icon::<State>(name, icon_size, color),
+        label(text).text_size(12.0).color(color),
+    ))
+    .cross_axis_alignment(CrossAxisAlignment::Center)
 }
 
 /// Compute simulated stereo L/R audio peak levels in `[0.0, 1.0]` at `current_time`

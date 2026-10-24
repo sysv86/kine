@@ -9,7 +9,7 @@
 //!   L/R Audio Peak Meters (`progress_bar`).
 //! - **Two-Column Proportional NLE Timeline**: Fixed 220px left track header gutter +
 //!   proportional horizontal clip bars (Teal/Mint visual clips, Violet audio clips,
-//!   Cyan WGSL shader clips) with clickable `◆` keyframe diamonds and zoom slider.
+//!   Cyan WGSL shader clips) with clickable keyframe diamonds and zoom slider.
 //! - **Collapsible Flat Property Inspector (`PropertyPanelFlat`)**: Header with kind badge,
 //!   visibility toggle, prompt copy, and clear selection; collapsible accordion sections
 //!   with 1-line live summaries (`Layout`, `Style`, `Typography`, `Motion`, `Shaders & FX`);
@@ -20,7 +20,8 @@ use crate::state::{LeftDockTab, RenderJobStatus, RightDockTab, StudioState};
 use crate::theme::sample_audio_meter_levels;
 #[cfg(feature = "xilem-ui")]
 use crate::theme::{
-    dock_card_shell, dock_tab_pill, flat_group_header, kind_badge_chip, StudioPalette,
+    dock_card_shell, dock_tab_pill, flat_group_header, icon, icon_button, icon_text,
+    icon_text_button, kind_badge_chip, StudioPalette,
 };
 use crate::timeline::{generate_ruler_ticks, TimelineTrackKind};
 use kine_core::NodeId;
@@ -47,7 +48,8 @@ pub fn run_studio(state: StudioState) -> Result<(), EventLoopError> {
         state,
         app_logic,
         WindowOptions::new("Kine Studio — Video-as-Code NLE & AI Agent Studio (Xilem)"),
-    );
+    )
+    .with_font(include_bytes!("../assets/MaterialSymbolsOutlined.ttf").to_vec());
     app.run_in(EventLoop::with_user_event())
 }
 
@@ -86,32 +88,42 @@ fn header_bar_view(
         .get(state.active_composition)
         .map(|c| c.title.clone())
         .unwrap_or_else(|| "Untitled Composition".to_string());
-    let backend_label = format!("⚡ {}", state.engine.backend().name().to_uppercase());
+    let backend_label = state.engine.backend().name().to_uppercase();
     let res_label = format!(
         "{}×{} · {:.0}fps",
         state.scene_def.width, state.scene_def.height, state.fps
     );
-    let (lint_label, lint_color) = if state.inspect_findings.is_empty() {
-        ("✓ 0 issues".to_string(), pal.accent_mint)
+    let (lint_icon, lint_label, lint_color) = if state.inspect_findings.is_empty() {
+        ("check", "0 issues".to_string(), pal.accent_mint)
     } else {
         (
-            format!("⚠ {} findings", state.inspect_findings.len()),
+            "warning",
+            format!("{} findings", state.inspect_findings.len()),
             pal.warning_amber,
         )
     };
-    let theme_label = if state.dark_theme {
-        "☾ Graphite"
+    let theme_icon = if state.dark_theme {
+        "dark_mode"
     } else {
-        "☀ Paper"
+        "light_mode"
+    };
+    let theme_label = if state.dark_theme {
+        "Graphite"
+    } else {
+        "Paper"
     };
     let banner = state.status_banner.clone();
 
     flex_row(vec![
-        label("✦ KINE // STUDIO")
-            .weight(FontWeight::BOLD)
-            .text_size(13.0)
-            .color(pal.accent_mint)
-            .into_any_flex(),
+        flex_row((
+            icon::<StudioState>("auto_awesome", 15.0, pal.accent_mint),
+            label("KINE // STUDIO")
+                .weight(FontWeight::BOLD)
+                .text_size(13.0)
+                .color(pal.accent_mint),
+        ))
+        .cross_axis_alignment(CrossAxisAlignment::Center)
+        .into_any_flex(),
         label("|")
             .text_size(12.0)
             .color(pal.border_strong)
@@ -125,63 +137,98 @@ fn header_bar_view(
             .text_size(11.0)
             .color(pal.text_muted)
             .into_any_flex(),
-        label(lint_label)
-            .weight(FontWeight::SEMI_BOLD)
-            .text_size(11.0)
-            .color(lint_color)
-            .into_any_flex(),
+        icon_text::<StudioState, _>(lint_icon, lint_label, 14.0, lint_color).into_any_flex(),
         FlexSpacer::Flex(1.0).into_any_flex(),
         label(banner)
             .text_size(11.0)
             .color(pal.text_muted)
             .into_any_flex(),
         FlexSpacer::Flex(1.0).into_any_flex(),
-        text_button("📷 Capture PNG", |st: &mut StudioState| {
-            let _ = st.capture_current_frame(FrameFormat::Png, Path::new("studio-capture.png"));
-        })
-        .into_any_flex(),
-        text_button("◇ SVG", |st: &mut StudioState| {
-            let _ = st.capture_current_frame(FrameFormat::Svg, Path::new("studio-capture.svg"));
-        })
-        .into_any_flex(),
-        text_button(
-            if state.inspector_visible {
-                "◧ Inspector: ON"
-            } else {
-                "◧ Inspector: OFF"
+        icon_text_button(
+            "photo_camera",
+            "Capture PNG",
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.capture_current_frame(FrameFormat::Png, Path::new("studio-capture.png"));
             },
+        )
+        .into_any_flex(),
+        icon_text_button(
+            "download",
+            "SVG",
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.capture_current_frame(FrameFormat::Svg, Path::new("studio-capture.svg"));
+            },
+        )
+        .into_any_flex(),
+        icon_text_button(
+            "view_sidebar",
+            if state.inspector_visible {
+                "Inspector: ON"
+            } else {
+                "Inspector: OFF"
+            },
+            14.0,
+            pal.text_primary,
             |st: &mut StudioState| {
                 st.inspector_visible = !st.inspector_visible;
             },
         )
         .into_any_flex(),
-        text_button(theme_label, |st: &mut StudioState| {
-            st.dark_theme = !st.dark_theme;
-            st.status_banner = format!(
-                "Switched theme to {}",
-                if st.dark_theme {
-                    "Graphite (Dark)"
-                } else {
-                    "Paper (Light)"
-                }
-            );
-        })
+        icon_text_button(
+            theme_icon,
+            theme_label,
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.dark_theme = !st.dark_theme;
+                st.status_banner = format!(
+                    "Switched theme to {}",
+                    if st.dark_theme {
+                        "Graphite (Dark)"
+                    } else {
+                        "Paper (Light)"
+                    }
+                );
+            },
+        )
         .into_any_flex(),
-        text_button(backend_label, |st: &mut StudioState| {
-            st.cycle_render_backend();
-        })
+        icon_text_button(
+            "bolt",
+            backend_label,
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.cycle_render_backend();
+            },
+        )
         .into_any_flex(),
-        text_button("✦ Ask Agent", |st: &mut StudioState| {
-            st.right_tab = RightDockTab::AiAgent;
-            st.inspector_visible = true;
-            let _ = st.generate_selected_element_prompt("");
-        })
+        icon_text_button(
+            "smart_toy",
+            "Ask Agent",
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.right_tab = RightDockTab::AiAgent;
+                st.inspector_visible = true;
+                let _ = st.generate_selected_element_prompt("");
+            },
+        )
         .into_any_flex(),
-        sized_box(text_button("▶ Export", |st: &mut StudioState| {
-            st.right_tab = RightDockTab::Renders;
-            st.inspector_visible = true;
-            let _ = st.run_export_job();
-        }))
+        sized_box(icon_text_button(
+            "play_arrow",
+            "Export",
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.right_tab = RightDockTab::Renders;
+                st.inspector_visible = true;
+                let _ = st.run_export_job();
+            },
+        ))
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
         .corner_radius(6.0)
@@ -239,19 +286,26 @@ fn left_dock_view(
             for (idx, comp) in state.compositions.iter().enumerate() {
                 let is_active = idx == state.active_composition;
                 let badge = if idx == 0 { "MASTER" } else { "COMP" };
-                let title = if is_active {
-                    format!("● {}", comp.title)
+                let marker = if is_active {
+                    "radio_button_checked"
                 } else {
-                    format!("○ {}", comp.title)
+                    "radio_button_unchecked"
                 };
+                let title = comp.title.clone();
                 let sub = comp.subtitle.clone();
                 items.push(
                     flex_col(vec![
                         flex_row(vec![
                             kind_badge_chip(badge, pal).into_any_flex(),
-                            text_button(title, move |st: &mut StudioState| {
-                                let _ = st.select_composition(idx);
-                            })
+                            icon_text_button(
+                                marker,
+                                title,
+                                12.0,
+                                pal.text_primary,
+                                move |st: &mut StudioState| {
+                                    let _ = st.select_composition(idx);
+                                },
+                            )
                             .into_any_flex(),
                         ])
                         .cross_axis_alignment(CrossAxisAlignment::Center)
@@ -321,11 +375,17 @@ fn left_dock_view(
                             .color(pal.text_primary)
                             .into_any_flex(),
                         FlexSpacer::Flex(1.0).into_any_flex(),
-                        text_button("▶ Apply to Engine", |st: &mut StudioState| {
-                            if let Err(e) = st.apply_source_buffer() {
-                                st.status_banner = e.to_string();
-                            }
-                        })
+                        icon_text_button(
+                            "play_arrow",
+                            "Apply to Engine",
+                            13.0,
+                            pal.text_primary,
+                            |st: &mut StudioState| {
+                                if let Err(e) = st.apply_source_buffer() {
+                                    st.status_banner = e.to_string();
+                                }
+                            },
+                        )
                         .into_any_flex(),
                     ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
@@ -355,15 +415,21 @@ fn left_dock_view(
                 } else {
                     "RECT"
                 };
-                let btn_label = format!("+ {}", item.label);
+                let btn_label = item.label;
                 let desc = format!("{} — {}", item.category, item.description);
                 items.push(
                     flex_col(vec![
                         flex_row(vec![
                             kind_badge_chip(cat_badge, pal).into_any_flex(),
-                            text_button(btn_label, move |st: &mut StudioState| {
-                                let _ = st.insert_catalog_item(item_id);
-                            })
+                            icon_text_button(
+                                "add",
+                                btn_label,
+                                12.0,
+                                pal.text_primary,
+                                move |st: &mut StudioState| {
+                                    let _ = st.insert_catalog_item(item_id);
+                                },
+                            )
                             .into_any_flex(),
                         ])
                         .cross_axis_alignment(CrossAxisAlignment::Center)
@@ -413,22 +479,33 @@ fn preview_pane_view(
         .get(state.active_composition)
         .map(|c| c.title.as_str())
         .unwrap_or("Composition");
-    let sel_crumb = if let Some(snap) = state.inspect_selected_node() {
-        format!(
-            "{} ▸ {} ({:.0}×{:.0} px)",
-            comp_title, snap.label, snap.computed_rect.width, snap.computed_rect.height
+    let (sel_head, sel_tail) = if let Some(snap) = state.inspect_selected_node() {
+        (
+            comp_title.to_string(),
+            format!(
+                "{} ({:.0}×{:.0} px)",
+                snap.label, snap.computed_rect.width, snap.computed_rect.height
+            ),
         )
     } else {
-        format!("{comp_title} ▸ (No selection)")
+        (comp_title.to_string(), "(No selection)".to_string())
     };
 
     // Top Breadcrumb & Viewport Guides Bar (Hyperframes PreviewPane + PreviewZoomOverlay)
     let viewport_hud = flex_row(vec![
-        label(sel_crumb)
-            .weight(FontWeight::SEMI_BOLD)
-            .text_size(11.5)
-            .color(pal.text_primary)
-            .into_any_flex(),
+        flex_row((
+            label(sel_head)
+                .weight(FontWeight::SEMI_BOLD)
+                .text_size(11.5)
+                .color(pal.text_primary),
+            icon::<StudioState>("chevron_right", 13.0, pal.text_muted),
+            label(sel_tail)
+                .weight(FontWeight::SEMI_BOLD)
+                .text_size(11.5)
+                .color(pal.text_primary),
+        ))
+        .cross_axis_alignment(CrossAxisAlignment::Center)
+        .into_any_flex(),
         FlexSpacer::Flex(1.0).into_any_flex(),
         checkbox(
             "Bounds",
@@ -466,7 +543,7 @@ fn preview_pane_view(
             },
         )
         .into_any_flex(),
-        text_button("−", |st: &mut StudioState| {
+        icon_button("remove", 14.0, pal.text_primary, |st: &mut StudioState| {
             st.viewport_zoom = (st.viewport_zoom - 0.25).clamp(0.25, 4.0);
         })
         .into_any_flex(),
@@ -477,7 +554,7 @@ fn preview_pane_view(
             },
         )
         .into_any_flex(),
-        text_button("+", |st: &mut StudioState| {
+        icon_button("add", 14.0, pal.text_primary, |st: &mut StudioState| {
             st.viewport_zoom = (st.viewport_zoom + 0.25).clamp(0.25, 4.0);
         })
         .into_any_flex(),
@@ -558,10 +635,10 @@ fn transport_controls_view(
     state: &mut StudioState,
     pal: StudioPalette,
 ) -> impl WidgetView<StudioState> + use<> {
-    let play_label = if state.is_playing {
-        "⏸ Pause"
+    let (play_icon, play_label) = if state.is_playing {
+        ("pause", "Pause")
     } else {
-        "▶ Play"
+        ("play_arrow", "Play")
     };
     let timecode = state.formatted_timecode();
     let dur = state.duration.max(0.1);
@@ -569,34 +646,62 @@ fn transport_controls_view(
     let speed_label = format!("{:.2}x", state.playback_rate);
 
     flex_row(vec![
-        text_button("⏮", |st: &mut StudioState| {
-            st.is_playing = false;
-            st.seek_to(0.0, false);
-        })
+        icon_button(
+            "skip_previous",
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.is_playing = false;
+                st.seek_to(0.0, false);
+            },
+        )
         .into_any_flex(),
-        text_button("◀ -1f", |st: &mut StudioState| {
-            st.step_frames(-1);
-        })
+        icon_text_button(
+            "chevron_left",
+            "-1f",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.step_frames(-1);
+            },
+        )
         .into_any_flex(),
-        sized_box(text_button(play_label, |st: &mut StudioState| {
-            st.is_playing = !st.is_playing;
-            if st.is_playing {
-                st.tick_playback(1.0 / st.fps.max(1.0));
-            }
-        }))
+        sized_box(icon_text_button(
+            play_icon,
+            play_label,
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.is_playing = !st.is_playing;
+                if st.is_playing {
+                    st.tick_playback(1.0 / st.fps.max(1.0));
+                }
+            },
+        ))
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
         .corner_radius(6.0)
         .into_any_flex(),
-        text_button("+1f ▶", |st: &mut StudioState| {
-            st.step_frames(1);
-        })
+        icon_text_button(
+            "chevron_right",
+            "+1f",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.step_frames(1);
+            },
+        )
         .into_any_flex(),
-        text_button("⏭", |st: &mut StudioState| {
-            st.is_playing = false;
-            let end = st.duration;
-            st.seek_to(end, false);
-        })
+        icon_button(
+            "skip_next",
+            14.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.is_playing = false;
+                let end = st.duration;
+                st.seek_to(end, false);
+            },
+        )
         .into_any_flex(),
         text_button(timecode, |st: &mut StudioState| {
             st.show_frames = !st.show_frames;
@@ -644,27 +749,39 @@ fn timeline_pane_view(
     state: &mut StudioState,
     pal: StudioPalette,
 ) -> impl WidgetView<StudioState> + use<> {
-    let undo_label = format!("↶ ({})", state.undo_stack.len());
-    let redo_label = format!("↷ ({})", state.redo_stack.len());
+    let undo_label = format!("({})", state.undo_stack.len());
+    let redo_label = format!("({})", state.redo_stack.len());
     let zoom_pct = ((state.timeline_zoom_pps / 140.0) * 100.0).round() as u32;
     let zoom_val = f64::from(state.timeline_zoom_pps.clamp(40.0, 400.0));
 
     // Hyperframes TimelineToolbar parity: History | Snap & Ripple & Meters | Keyframe & Auto-KF | Split/Dup/Del | Zoom Slider + Fit
     let history_group = flex_row(vec![
-        text_button(undo_label, |st: &mut StudioState| {
-            let _ = st.undo();
-        })
+        icon_text_button(
+            "undo",
+            undo_label,
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.undo();
+            },
+        )
         .into_any_flex(),
-        text_button(redo_label, |st: &mut StudioState| {
-            let _ = st.redo();
-        })
+        icon_text_button(
+            "redo",
+            redo_label,
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.redo();
+            },
+        )
         .into_any_flex(),
         label("|")
             .text_size(11.0)
             .color(pal.border_strong)
             .into_any_flex(),
         checkbox(
-            "🧲 Snap (N)",
+            "Snap (N)",
             state.timeline_snap_enabled,
             |st: &mut StudioState, v: bool| {
                 st.timeline_snap_enabled = v;
@@ -672,7 +789,7 @@ fn timeline_pane_view(
         )
         .into_any_flex(),
         checkbox(
-            "≋ Ripple",
+            "Ripple",
             state.ripple_edit,
             |st: &mut StudioState, v: bool| {
                 st.ripple_edit = v;
@@ -680,7 +797,7 @@ fn timeline_pane_view(
         )
         .into_any_flex(),
         checkbox(
-            "📊 Meters",
+            "Meters",
             state.show_audio_meters,
             |st: &mut StudioState, v: bool| {
                 st.show_audio_meters = v;
@@ -695,23 +812,41 @@ fn timeline_pane_view(
             .text_size(11.0)
             .color(pal.border_strong)
             .into_any_flex(),
-        text_button("◀ KF", |st: &mut StudioState| {
-            st.timeline_jump_prev_keyframe();
-        })
+        icon_text_button(
+            "chevron_left",
+            "KF",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.timeline_jump_prev_keyframe();
+            },
+        )
         .into_any_flex(),
-        sized_box(text_button("◆ +KF (K)", |st: &mut StudioState| {
-            let _ = st.timeline_add_keyframe_at_playhead();
-        }))
+        sized_box(icon_text_button(
+            "diamond",
+            "+KF (K)",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.timeline_add_keyframe_at_playhead();
+            },
+        ))
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
         .corner_radius(5.0)
         .into_any_flex(),
-        text_button("KF ▶", |st: &mut StudioState| {
-            st.timeline_jump_next_keyframe();
-        })
+        icon_text_button(
+            "chevron_right",
+            "KF",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                st.timeline_jump_next_keyframe();
+            },
+        )
         .into_any_flex(),
         checkbox(
-            "● Auto-KF",
+            "Auto-KF",
             state.auto_keyframe,
             |st: &mut StudioState, v: bool| {
                 st.auto_keyframe = v;
@@ -726,17 +861,35 @@ fn timeline_pane_view(
             .text_size(11.0)
             .color(pal.border_strong)
             .into_any_flex(),
-        text_button("✂ Split (S)", |st: &mut StudioState| {
-            let _ = st.timeline_split_at_playhead();
-        })
+        icon_text_button(
+            "content_cut",
+            "Split (S)",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.timeline_split_at_playhead();
+            },
+        )
         .into_any_flex(),
-        text_button("⧉ Dup", |st: &mut StudioState| {
-            let _ = st.timeline_duplicate_selected();
-        })
+        icon_text_button(
+            "content_copy",
+            "Dup",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.timeline_duplicate_selected();
+            },
+        )
         .into_any_flex(),
-        text_button("⌫ Del", |st: &mut StudioState| {
-            let _ = st.timeline_delete_selected();
-        })
+        icon_text_button(
+            "delete",
+            "Del",
+            13.0,
+            pal.text_primary,
+            |st: &mut StudioState| {
+                let _ = st.timeline_delete_selected();
+            },
+        )
         .into_any_flex(),
     ])
     .cross_axis_alignment(CrossAxisAlignment::Center);
@@ -771,10 +924,14 @@ fn timeline_pane_view(
     let playhead_sec = state.current_time;
     tick_buttons.push(
         sized_box(
-            label(format!("▼ {:.2}s", playhead_sec))
-                .weight(FontWeight::BOLD)
-                .text_size(10.5)
-                .color(pal.accent_mint),
+            flex_row((
+                icon::<StudioState>("arrow_drop_down", 14.0, pal.accent_mint),
+                label(format!("{:.2}s", playhead_sec))
+                    .weight(FontWeight::BOLD)
+                    .text_size(10.5)
+                    .color(pal.accent_mint),
+            ))
+            .cross_axis_alignment(CrossAxisAlignment::Center),
         )
         .padding(2.0)
         .background_color(pal.accent_mint_wash)
@@ -832,10 +989,16 @@ fn timeline_pane_view(
         for kf in &track.keyframes {
             let kf_t = kf.time;
             let kf_v = kf.value;
-            let chip_lbl = format!("◆{kf_t:.2}s ({kf_v:.0})");
-            kf_chips.push(text_button(chip_lbl, move |st: &mut StudioState| {
-                st.seek_to(kf_t, false);
-            }));
+            let chip_lbl = format!("{kf_t:.2}s ({kf_v:.0})");
+            kf_chips.push(icon_text_button(
+                "diamond",
+                chip_lbl,
+                11.0,
+                pal.text_primary,
+                move |st: &mut StudioState| {
+                    st.seek_to(kf_t, false);
+                },
+            ));
         }
 
         match track.kind {
@@ -935,9 +1098,7 @@ fn timeline_pane_view(
                 let prop = property.clone();
                 let left_gutter = sized_box(
                     flex_row(vec![
-                        label("   ↳")
-                            .text_size(11.0)
-                            .color(pal.accent_mint)
+                        icon::<StudioState>("subdirectory_arrow_right", 13.0, pal.accent_mint)
                             .into_any_flex(),
                         text_button(property.clone(), move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
@@ -1016,11 +1177,13 @@ fn timeline_pane_view(
                 // Hyperframes violet audio pill (`--timeline-clip-audio-bg`) with simulated waveform bars
                 let audio_pill = sized_box(
                     flex_row(vec![
-                        label(format!("♫ {} · ▁▃▅▇▃▂▄▆█▆▄▂", track.subtitle))
+                        icon::<StudioState>("music_note", 13.0, pal.text_primary).into_any_flex(),
+                        label(track.subtitle.clone())
                             .weight(FontWeight::SEMI_BOLD)
                             .text_size(11.0)
                             .color(pal.text_primary)
                             .into_any_flex(),
+                        icon::<StudioState>("graphic_eq", 13.0, pal.accent_mint).into_any_flex(),
                         FlexSpacer::Flex(1.0).into_any_flex(),
                     ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
@@ -1119,14 +1282,24 @@ fn right_dock_view(
                             .color(pal.text_primary)
                             .into_any_flex(),
                         FlexSpacer::Flex(1.0).into_any_flex(),
-                        text_button("👁", move |st: &mut StudioState| {
-                            let _ = st.layer_toggle_visibility(nid);
-                        })
+                        icon_button(
+                            "visibility",
+                            14.0,
+                            pal.text_primary,
+                            move |st: &mut StudioState| {
+                                let _ = st.layer_toggle_visibility(nid);
+                            },
+                        )
                         .into_any_flex(),
-                        text_button("📋", |st: &mut StudioState| {
-                            let _ = st.generate_selected_element_prompt("");
-                            st.right_tab = RightDockTab::AiAgent;
-                        })
+                        icon_button(
+                            "content_copy",
+                            14.0,
+                            pal.text_primary,
+                            |st: &mut StudioState| {
+                                let _ = st.generate_selected_element_prompt("");
+                                st.right_tab = RightDockTab::AiAgent;
+                            },
+                        )
                         .into_any_flex(),
                         text_button(
                             if show_all {
@@ -1182,21 +1355,45 @@ fn right_dock_view(
                     sections.push(
                         flex_col(vec![
                             flex_row(vec![
-                                text_button("◰ Left", |st: &mut StudioState| {
-                                    let _ = st.inspector_align_selected(Some("left"), None);
-                                })
+                                icon_text_button(
+                                    "align_horizontal_left",
+                                    "Left",
+                                    13.0,
+                                    pal.text_primary,
+                                    |st: &mut StudioState| {
+                                        let _ = st.inspector_align_selected(Some("left"), None);
+                                    },
+                                )
                                 .into_any_flex(),
-                                text_button("◫ Center H", |st: &mut StudioState| {
-                                    let _ = st.inspector_align_selected(Some("center"), None);
-                                })
+                                icon_text_button(
+                                    "align_horizontal_center",
+                                    "Center H",
+                                    13.0,
+                                    pal.text_primary,
+                                    |st: &mut StudioState| {
+                                        let _ = st.inspector_align_selected(Some("center"), None);
+                                    },
+                                )
                                 .into_any_flex(),
-                                text_button("◳ Right", |st: &mut StudioState| {
-                                    let _ = st.inspector_align_selected(Some("right"), None);
-                                })
+                                icon_text_button(
+                                    "align_horizontal_right",
+                                    "Right",
+                                    13.0,
+                                    pal.text_primary,
+                                    |st: &mut StudioState| {
+                                        let _ = st.inspector_align_selected(Some("right"), None);
+                                    },
+                                )
                                 .into_any_flex(),
-                                text_button("⬓ Middle V", |st: &mut StudioState| {
-                                    let _ = st.inspector_align_selected(None, Some("middle"));
-                                })
+                                icon_text_button(
+                                    "align_vertical_center",
+                                    "Middle V",
+                                    13.0,
+                                    pal.text_primary,
+                                    |st: &mut StudioState| {
+                                        let _ = st.inspector_align_selected(None, Some("middle"));
+                                    },
+                                )
                                 .into_any_flex(),
                             ])
                             .into_any_flex(),
@@ -1554,21 +1751,45 @@ fn right_dock_view(
                     }
                     fx_rows.push(
                         flex_row(vec![
-                            text_button("+ Vignette", |st: &mut StudioState| {
-                                let _ = st.insert_catalog_item("shader-vignette");
-                            })
+                            icon_text_button(
+                                "add",
+                                "Vignette",
+                                12.0,
+                                pal.text_primary,
+                                |st: &mut StudioState| {
+                                    let _ = st.insert_catalog_item("shader-vignette");
+                                },
+                            )
                             .into_any_flex(),
-                            text_button("+ Film Grain", |st: &mut StudioState| {
-                                let _ = st.insert_catalog_item("shader-film-grain");
-                            })
+                            icon_text_button(
+                                "add",
+                                "Film Grain",
+                                12.0,
+                                pal.text_primary,
+                                |st: &mut StudioState| {
+                                    let _ = st.insert_catalog_item("shader-film-grain");
+                                },
+                            )
                             .into_any_flex(),
-                            text_button("+ Chromatic", |st: &mut StudioState| {
-                                let _ = st.insert_catalog_item("shader-chromatic");
-                            })
+                            icon_text_button(
+                                "add",
+                                "Chromatic",
+                                12.0,
+                                pal.text_primary,
+                                |st: &mut StudioState| {
+                                    let _ = st.insert_catalog_item("shader-chromatic");
+                                },
+                            )
                             .into_any_flex(),
-                            text_button("+ Scanlines", |st: &mut StudioState| {
-                                let _ = st.insert_catalog_item("shader-scanlines");
-                            })
+                            icon_text_button(
+                                "add",
+                                "Scanlines",
+                                12.0,
+                                pal.text_primary,
+                                |st: &mut StudioState| {
+                                    let _ = st.insert_catalog_item("shader-scanlines");
+                                },
+                            )
                             .into_any_flex(),
                         ])
                         .into_any_flex(),
@@ -1585,8 +1806,11 @@ fn right_dock_view(
                 // 6. Pinned PropertyPanelFlatFooter (Ask AI Agent + Auto-KF Recording Toggle)
                 sections.push(
                     flex_row(vec![
-                        sized_box(text_button(
-                            format!("✦ Ask AI Agent about {nid}"),
+                        sized_box(icon_text_button(
+                            "smart_toy",
+                            format!("Ask AI Agent about {nid}"),
+                            13.0,
+                            pal.text_primary,
                             |st: &mut StudioState| {
                                 let _ = st.generate_selected_element_prompt("");
                                 st.right_tab = RightDockTab::AiAgent;
@@ -1597,12 +1821,15 @@ fn right_dock_view(
                         .corner_radius(6.0)
                         .into_any_flex(),
                         FlexSpacer::Flex(1.0).into_any_flex(),
-                        text_button(
+                        icon_text_button(
+                            "fiber_manual_record",
                             if state.auto_keyframe {
-                                "● Auto-KF: REC"
+                                "Auto-KF: REC"
                             } else {
-                                "○ Auto-KF: OFF"
+                                "Auto-KF: OFF"
                             },
+                            13.0,
+                            pal.text_primary,
                             |st: &mut StudioState| {
                                 st.auto_keyframe = !st.auto_keyframe;
                             },
@@ -1622,11 +1849,22 @@ fn right_dock_view(
             for row in state.build_layer_tree_rows() {
                 let nid = row.node_id;
                 let indent = "  ".repeat(row.depth);
-                let vis_icon = if row.visible { "👁" } else { "🚫" };
-                let title = format!("{indent}{vis_icon} {}", row.label);
+                let vis_icon = if row.visible {
+                    "visibility"
+                } else {
+                    "visibility_off"
+                };
+                let vis_color = if row.visible {
+                    pal.text_muted
+                } else {
+                    pal.danger_coral
+                };
+                let title = row.label.clone();
                 sections.push(
                     flex_row(vec![
                         kind_badge_chip(row.badge, pal).into_any_flex(),
+                        label(indent).text_size(12.0).into_any_flex(),
+                        icon::<StudioState>(vis_icon, 13.0, vis_color).into_any_flex(),
                         text_button(title, move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
                             let _ = st.render_current_frame();
@@ -1637,13 +1875,23 @@ fn right_dock_view(
                             let _ = st.layer_toggle_visibility(nid);
                         })
                         .into_any_flex(),
-                        text_button("↑", move |st: &mut StudioState| {
-                            let _ = st.layer_move_z_order(nid, -1);
-                        })
+                        icon_button(
+                            "arrow_upward",
+                            13.0,
+                            pal.text_primary,
+                            move |st: &mut StudioState| {
+                                let _ = st.layer_move_z_order(nid, -1);
+                            },
+                        )
                         .into_any_flex(),
-                        text_button("↓", move |st: &mut StudioState| {
-                            let _ = st.layer_move_z_order(nid, 1);
-                        })
+                        icon_button(
+                            "arrow_downward",
+                            13.0,
+                            pal.text_primary,
+                            move |st: &mut StudioState| {
+                                let _ = st.layer_move_z_order(nid, 1);
+                            },
+                        )
                         .into_any_flex(),
                     ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
@@ -1671,13 +1919,17 @@ fn right_dock_view(
             let draft = state.chat.input_draft.clone();
             sections.push(
                 flex_col(vec![
-                    label(format!(
-                        "✦ WebMCP Agent Studio · Target {sel_id} · {}",
-                        state.chat.provider_model
+                    flex_row((
+                        icon::<StudioState>("smart_toy", 14.0, pal.accent_mint),
+                        label(format!(
+                            "WebMCP Agent Studio · Target {sel_id} · {}",
+                            state.chat.provider_model
+                        ))
+                        .weight(FontWeight::BOLD)
+                        .text_size(12.0)
+                        .color(pal.accent_mint),
                     ))
-                    .weight(FontWeight::BOLD)
-                    .text_size(12.0)
-                    .color(pal.accent_mint)
+                    .cross_axis_alignment(CrossAxisAlignment::Center)
                     .into_any_flex(),
                     checkbox(
                         "Attach selected node context",
@@ -1692,24 +1944,42 @@ fn right_dock_view(
                     })
                     .into_any_flex(),
                     flex_row(vec![
-                        sized_box(text_button("▶ Send to Agent", |st: &mut StudioState| {
-                            let _ = st.submit_current_chat_draft();
-                        }))
+                        sized_box(icon_text_button(
+                            "send",
+                            "Send to Agent",
+                            13.0,
+                            pal.text_primary,
+                            |st: &mut StudioState| {
+                                let _ = st.submit_current_chat_draft();
+                            },
+                        ))
                         .background_color(pal.accent_mint_wash)
                         .border(pal.accent_mint, 1.0)
                         .corner_radius(6.0)
                         .into_any_flex(),
-                        text_button("📋 Prompt v1", |st: &mut StudioState| {
-                            let _ = st.generate_selected_element_prompt("");
-                        })
+                        icon_text_button(
+                            "content_copy",
+                            "Prompt v1",
+                            13.0,
+                            pal.text_primary,
+                            |st: &mut StudioState| {
+                                let _ = st.generate_selected_element_prompt("");
+                            },
+                        )
                         .into_any_flex(),
                         text_button("/look", |st: &mut StudioState| {
                             let _ = st.submit_chat_prompt("/look");
                         })
                         .into_any_flex(),
-                        text_button("+ Film Grain", |st: &mut StudioState| {
-                            let _ = st.submit_chat_prompt("add film grain");
-                        })
+                        icon_text_button(
+                            "add",
+                            "Film Grain",
+                            13.0,
+                            pal.text_primary,
+                            |st: &mut StudioState| {
+                                let _ = st.submit_chat_prompt("add film grain");
+                            },
+                        )
                         .into_any_flex(),
                     ])
                     .into_any_flex(),
@@ -1800,8 +2070,11 @@ fn right_dock_view(
                         st.export_output_path = next;
                     })
                     .into_any_flex(),
-                    sized_box(text_button(
-                        "▶ Start In-Process Render",
+                    sized_box(icon_text_button(
+                        "play_arrow",
+                        "Start In-Process Render",
+                        13.0,
+                        pal.text_primary,
                         |st: &mut StudioState| {
                             let _ = st.run_export_job();
                         },

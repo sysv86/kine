@@ -147,7 +147,7 @@ impl StudioState {
                             property: prop.clone(),
                             easing: easing.clone(),
                         },
-                        label: format!("  ↳ {prop}"),
+                        label: prop.clone(),
                         subtitle: format!("{p_start:.2}s..{p_end:.2}s ({easing})"),
                         start_sec: p_start,
                         end_sec: p_end,
