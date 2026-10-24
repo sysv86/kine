@@ -149,10 +149,18 @@ pub struct StudioState {
     pub auto_keyframe: bool,
     pub ripple_edit: bool,
 
+    // ── Theme & Flat Inspector UX State (Hyperframes Parity) ───────────────
+    pub dark_theme: bool,
+    pub open_inspector_group: String,
+    pub collapsed_nodes: std::collections::BTreeSet<u64>,
+
     // ── Viewport & Raster Cache ────────────────────────────────────────────
     pub viewport_zoom: f32,
     pub show_bounding_boxes: bool,
     pub show_safe_guides: bool,
+    pub show_grid_overlay: bool,
+    pub topology_lens_active: bool,
+    pub show_audio_meters: bool,
     pub last_raw_pixmap: RasterPixmap,
     pub last_viewport_pixmap: RasterPixmap,
     #[cfg(feature = "xilem-ui")]
@@ -232,9 +240,15 @@ impl StudioState {
             timeline_snap_enabled: true,
             auto_keyframe: true,
             ripple_edit: false,
+            dark_theme: true,
+            open_inspector_group: "layout".to_string(),
+            collapsed_nodes: std::collections::BTreeSet::new(),
             viewport_zoom: 1.0,
             show_bounding_boxes: true,
             show_safe_guides: false,
+            show_grid_overlay: false,
+            topology_lens_active: true,
+            show_audio_meters: true,
             last_raw_pixmap: raw_px.clone(),
             last_viewport_pixmap: raw_px,
             #[cfg(feature = "xilem-ui")]
@@ -376,12 +390,37 @@ impl StudioState {
             draw_rect_outline(&mut out, title_rect, [56, 189, 248, 90], 1, true);
         }
 
+        if self.show_grid_overlay {
+            let fw = f32::from(w);
+            let fh = f32::from(h);
+            // Rule of thirds + center crosshair
+            draw_rect_outline(
+                &mut out,
+                Rect::new(fw / 3.0, 0.0, fw / 3.0, fh),
+                [244, 244, 245, 55],
+                1,
+                true,
+            );
+            draw_rect_outline(
+                &mut out,
+                Rect::new(0.0, fh / 3.0, fw, fh / 3.0),
+                [244, 244, 245, 55],
+                1,
+                true,
+            );
+        }
+
         if self.show_bounding_boxes {
             if let Some(sel_id) = self.selected_node {
                 if sel_id != NodeId(0) {
                     if let Some(rect) = self.node_abs_rect(sel_id) {
-                        draw_rect_outline(&mut out, rect, [56, 189, 248, 255], 2, false);
-                        draw_corner_handles(&mut out, rect, [56, 189, 248, 255]);
+                        let ring_color = if self.topology_lens_active {
+                            [60, 230, 172, 255] // Hyperframes Mint (#3ce6ac)
+                        } else {
+                            [75, 163, 210, 255] // Hyperframes Selection Sky (#4ba3d2)
+                        };
+                        draw_rect_outline(&mut out, rect, ring_color, 2, false);
+                        draw_corner_handles(&mut out, rect, ring_color);
                     }
                 }
             }
@@ -935,20 +974,35 @@ fn draw_rect_outline(
 }
 
 fn draw_corner_handles(pixmap: &mut RasterPixmap, rect: Rect, rgba: [u8; 4]) {
-    let corners = [
-        (rect.x.round() as i32, rect.y.round() as i32),
-        ((rect.x + rect.width).round() as i32, rect.y.round() as i32),
-        (rect.x.round() as i32, (rect.y + rect.height).round() as i32),
-        (
-            (rect.x + rect.width).round() as i32,
-            (rect.y + rect.height).round() as i32,
-        ),
+    let x0 = rect.x.round() as i32;
+    let y0 = rect.y.round() as i32;
+    let x1 = (rect.x + rect.width).round() as i32;
+    let y1 = (rect.y + rect.height).round() as i32;
+    let xm = (rect.x + rect.width * 0.5).round() as i32;
+    let ym = (rect.y + rect.height * 0.5).round() as i32;
+
+    let handles = [
+        (x0, y0),
+        (x1, y0),
+        (x0, y1),
+        (x1, y1),
+        (xm, y0),
+        (xm, y1),
+        (x0, ym),
+        (x1, ym),
     ];
-    for (cx, cy) in corners {
+    for (cx, cy) in handles {
         for dy in -3..=3 {
             for dx in -3..=3 {
-                blend_pixel(pixmap, cx + dx, cy + dy, rgba);
+                let is_border = dx.abs() == 3 || dy.abs() == 3;
+                let fill = if is_border { rgba } else { [255, 255, 255, 255] };
+                blend_pixel(pixmap, cx + dx, cy + dy, fill);
             }
         }
+    }
+    // Center anchor reticle
+    for d in -4..=4 {
+        blend_pixel(pixmap, xm + d, ym, rgba);
+        blend_pixel(pixmap, xm, ym + d, rgba);
     }
 }

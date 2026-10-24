@@ -7,6 +7,7 @@ pub mod catalog;
 pub mod chat;
 pub mod inspector;
 pub mod state;
+pub mod theme;
 pub mod timeline;
 pub mod ui;
 
@@ -26,6 +27,9 @@ pub use inspector::{LayerTreeRow, NodeInspectorSnapshot};
 pub use state::{
     LeftDockTab, RenderJobStatus, RenderQueueJob, RightDockTab, StudioError, StudioState, UndoEntry,
 };
+pub use theme::sample_audio_meter_levels;
+#[cfg(feature = "xilem-ui")]
+pub use theme::StudioPalette;
 pub use timeline::{
     generate_ruler_ticks, node_def_badge, node_def_display_label, TimelineKeyframeMarker,
     TimelineTick, TimelineTrack, TimelineTrackKind,
@@ -49,6 +53,8 @@ mod tests {
         assert_eq!(state.last_raw_pixmap.height(), 360);
         assert!(state.frame_revision >= 1);
         assert!(state.inspect_findings.is_empty());
+        assert!(state.dark_theme);
+        assert!(state.topology_lens_active);
     }
 
     #[test]
@@ -183,5 +189,13 @@ mod tests {
         let seek_receipts = state.submit_chat_prompt(&json_call);
         assert_eq!(seek_receipts.len(), 1);
         assert!((state.current_time - 1.25).abs() < 1e-4);
+    }
+
+    #[test]
+    fn audio_meter_sampling_respects_mute_and_volume() {
+        let (l, r) = sample_audio_meter_levels(true, false, 0.85, 0.5);
+        assert!(l > 0.0 && r > 0.0);
+        let (ml, mr) = sample_audio_meter_levels(true, true, 0.85, 0.5);
+        assert_eq!((ml, mr), (0.0, 0.0));
     }
 }
