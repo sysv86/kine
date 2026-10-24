@@ -423,6 +423,10 @@ impl<'a> EvalContext<'a> {
             match stmt {
                 Statement::Emit(range) => {
                     for h in range.clone() {
+                        if matches!(func.expressions[h], Expression::CallResult(_)) {
+                            continue;
+                        }
+                        cached[h.index()] = None;
                         let v = self.eval_expr(func, h, args, locals, cached);
                         cached[h.index()] = Some(v);
                     }
@@ -1231,5 +1235,45 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         // Pixel (3, 3) inside scissor is pure red
         let idx = (3 * 8 + 3) * 4;
         assert_eq!(&fb[idx..idx + 4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn executes_loops_and_helper_function_calls_accurately() {
+        let wgsl = r#"
+fn step_val(i: f32) -> f32 {
+    return (i + 1.0) * 0.1;
+}
+
+@fragment
+fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    var acc: f32 = 0.0;
+    var i: i32 = 0;
+    loop {
+        if (i >= 4) {
+            break;
+        }
+        acc = acc + step_val(f32(i));
+        i = i + 1;
+    }
+    // 0.1 + 0.2 + 0.3 + 0.4 = 1.0
+    return vec4<f32>(acc, 0.5, 0.25, 1.0);
+}
+"#;
+        let prog = CpuShaderProgram::compile(wgsl, &Map::new()).unwrap();
+        let mut fb = vec![0u8; 4 * 4 * 4];
+        prog.execute_on_premul_rgba(
+            &mut fb,
+            4,
+            4,
+            (0, 0, 4, 4),
+            0.0,
+            0,
+            CpuBlendMode::Normal,
+            1.0,
+        );
+        assert_eq!(fb[0], 255, "loop accumulation across 4 iterations must reach 1.0 (255)");
+        assert!((i32::from(fb[1]) - 128).abs() <= 1);
+        assert!((i32::from(fb[2]) - 64).abs() <= 1);
+        assert_eq!(fb[3], 255);
     }
 }
