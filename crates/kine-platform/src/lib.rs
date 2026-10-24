@@ -1,16 +1,18 @@
-//! Platform detection and storage policy for Linux and macOS.
+//! Platform detection and storage policy for Linux, Windows, and macOS.
 //!
-//! Kine targets **Linux** (`x86_64`, `aarch64`) and **macOS** (`aarch64` Apple
-//! Silicon, `x86_64`). All core subsystems — scene layout (`taffy`), text
-//! shaping (`cosmic-text`), CPU rasterization (`vello_cpu`), CPU WGSL shader VM
-//! (`naga`), software AV1 encoding (`rav1e`), audio synthesis/DSP/mixing
-//! (`symphonia`, `rubato`, `flacenc`, `hound`), and container muxing (`muxfin`,
-//! `mkv`) — execute deterministically across both operating systems without
-//! platform-specific branches.
+//! Kine targets **Linux** (`x86_64`, `aarch64`), **Windows** (`x86_64`,
+//! `aarch64`), and **macOS** (`aarch64` Apple Silicon, `x86_64`). All core
+//! subsystems — scene layout (`taffy`), text shaping (`cosmic-text`), CPU
+//! rasterization (`vello_cpu`), CPU WGSL shader VM (`naga`), software AV1
+//! encoding (`rav1e`), audio synthesis/DSP/mixing (`symphonia`, `rubato`,
+//! `flacenc`, `hound`), container muxing (`muxfin`, `mkv`), and the Xilem UI
+//! (`kine-studio`) — execute deterministically across all three operating
+//! systems without OS-specific divergence.
 //!
-//! Optional GPU acceleration uses `wgpu` + `vello_gpu` (Vulkan on Linux, Metal
-//! on macOS), and optional hardware H.264 encoding uses `gpu-video` (Vulkan
-//! Video on Linux, VideoToolbox on macOS).
+//! Optional GPU acceleration uses `wgpu` + `vello_gpu` (Vulkan on Linux,
+//! DirectX 12 / Vulkan on Windows, Metal on macOS), and optional hardware H.264
+//! encoding uses `gpu-video` (Vulkan Video on Linux/Windows, VideoToolbox on
+//! macOS).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,6 +22,8 @@ use std::path::{Path, PathBuf};
 pub enum PlatformKind {
     /// Linux (desktop, server, container, or CI runner).
     Linux,
+    /// Windows (desktop, workstation, or CI runner).
+    Windows,
     /// macOS (Apple Silicon or Intel).
     MacOs,
     /// Any other host OS where the portable CPU pipeline runs.
@@ -31,6 +35,10 @@ impl PlatformKind {
         matches!(self, Self::Linux)
     }
 
+    pub const fn is_windows(self) -> bool {
+        matches!(self, Self::Windows)
+    }
+
     pub const fn is_macos(self) -> bool {
         matches!(self, Self::MacOs)
     }
@@ -39,6 +47,7 @@ impl PlatformKind {
     pub const fn graphics_backend(self) -> &'static str {
         match self {
             Self::Linux => "vulkan",
+            Self::Windows => "dx12",
             Self::MacOs => "metal",
             Self::Other => "wgpu",
         }
@@ -47,7 +56,7 @@ impl PlatformKind {
     /// Hardware video encode backend expected on this OS when compiled with `hwencode`.
     pub const fn hw_video_backend(self) -> &'static str {
         match self {
-            Self::Linux => "vulkan-video",
+            Self::Linux | Self::Windows => "vulkan-video",
             Self::MacOs => "videotoolbox",
             Self::Other => "unavailable",
         }
@@ -57,13 +66,13 @@ impl PlatformKind {
 /// Raw, injectable observations about the host environment.
 #[derive(Debug, Clone, Default)]
 pub struct Facts {
-    /// Target OS string (e.g. `"linux"`, `"macos"`). When empty, defaults to `std::env::consts::OS`.
+    /// Target OS string (e.g. `"linux"`, `"windows"`, `"macos"`). When empty, defaults to `std::env::consts::OS`.
     pub os: String,
     /// Target architecture string (e.g. `"x86_64"`, `"aarch64"`). When empty, defaults to `std::env::consts::ARCH`.
     pub arch: String,
     /// Current working directory of the process.
     pub cwd: Option<PathBuf>,
-    /// Relevant environment variables (`HOME`, `KINE_OUTPUT_DIR`, `CI`, `GITHUB_ACTIONS`, etc.).
+    /// Relevant environment variables (`HOME`, `USERPROFILE`, `KINE_OUTPUT_DIR`, `CI`, `GITHUB_ACTIONS`, etc.).
     pub env: BTreeMap<String, String>,
     /// Whether Linux DRM render nodes (`/dev/dri/renderD128` or `/dev/dri/card0`) exist.
     pub linux_drm_device_present: bool,
@@ -75,6 +84,7 @@ impl Facts {
         let mut env = BTreeMap::new();
         for key in [
             "HOME",
+            "USERPROFILE",
             "KINE_OUTPUT_DIR",
             "VK_ICD_FILENAMES",
             "VK_DRIVER_FILES",
@@ -115,7 +125,7 @@ pub struct PlatformInfo {
     pub os: String,
     pub arch: String,
     pub kind: PlatformKind,
-    /// Primary GPU backend on this platform (`"vulkan"`, `"metal"`, or `"wgpu"`).
+    /// Primary GPU backend on this platform (`"vulkan"`, `"dx12"`, `"metal"`, or `"wgpu"`).
     pub graphics_backend: &'static str,
     /// Hardware video encode backend on this platform (`"vulkan-video"`, `"videotoolbox"`, or `"unavailable"`).
     pub hw_video_backend: &'static str,
@@ -145,6 +155,7 @@ impl PlatformInfo {
 
         let kind = match os_str {
             "linux" => PlatformKind::Linux,
+            "windows" => PlatformKind::Windows,
             "macos" => PlatformKind::MacOs,
             _ => PlatformKind::Other,
         };
@@ -162,7 +173,7 @@ impl PlatformInfo {
 
         let gpu_expected = match kind {
             PlatformKind::Linux => facts.linux_drm_device_present || vk_icd || sw_gpu,
-            PlatformKind::MacOs => true,
+            PlatformKind::Windows | PlatformKind::MacOs => true,
             PlatformKind::Other => false,
         };
 
@@ -185,6 +196,12 @@ impl PlatformInfo {
                             .to_string(),
                     );
                 }
+            }
+            PlatformKind::Windows => {
+                notes.push(
+                    "Windows host: DirectX 12 / Vulkan GPU rasterization (`wgpu`) and Vulkan Video H.264 encode supported alongside the deterministic CPU pipeline."
+                        .to_string(),
+                );
             }
             PlatformKind::MacOs => {
                 notes.push(
@@ -233,6 +250,11 @@ fn default_output_dir(facts: &Facts) -> PathBuf {
     if let Some(home) = facts.env.get("HOME") {
         if !home.is_empty() {
             return PathBuf::from(home);
+        }
+    }
+    if let Some(profile) = facts.env.get("USERPROFILE") {
+        if !profile.is_empty() {
+            return PathBuf::from(profile);
         }
     }
     PathBuf::from(".")
@@ -287,6 +309,7 @@ mod tests {
         let info = PlatformInfo::from_facts(&facts);
         assert_eq!(info.kind, PlatformKind::Linux);
         assert!(info.kind.is_linux());
+        assert!(!info.kind.is_windows());
         assert!(!info.kind.is_macos());
         assert_eq!(info.graphics_backend, "vulkan");
         assert_eq!(info.hw_video_backend, "vulkan-video");
@@ -307,6 +330,24 @@ mod tests {
         assert!(info.ci);
         assert!(!info.gpu_expected);
         assert!(info.notes.iter().any(|n| n.contains("headless")));
+    }
+
+    #[test]
+    fn windows_host_reports_dx12_and_vulkan_video() {
+        let facts = facts_for(
+            "windows",
+            "x86_64",
+            &[("USERPROFILE", "C:\\Users\\runner")],
+        );
+        let info = PlatformInfo::from_facts(&facts);
+        assert_eq!(info.kind, PlatformKind::Windows);
+        assert!(info.kind.is_windows());
+        assert!(!info.kind.is_linux());
+        assert!(!info.kind.is_macos());
+        assert_eq!(info.graphics_backend, "dx12");
+        assert_eq!(info.hw_video_backend, "vulkan-video");
+        assert!(info.gpu_expected);
+        assert!(info.notes.iter().any(|n| n.contains("DirectX 12")));
     }
 
     #[test]

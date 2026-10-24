@@ -8,8 +8,9 @@ pub mod runtime;
 pub mod transpile;
 
 pub use authoring::{
-    scene_from_def, AudioDef, AudioTrackDef, AuthoringError, CompressorDef, EqBandDef, NodeDef,
-    SceneDef,
+    parse_color, scene_from_def, AnimationDef, AudioDef, AudioTrackDef, AuthoringError,
+    CompressorDef, EdgesDef, EqBandDef, GradientDef, GradientStopDef, KeyframeDef, NodeDef,
+    SceneDef, SizeDef,
 };
 pub use runtime::{
     eval_scene_def_js, eval_scene_def_ts, eval_scene_js, eval_scene_ts, PRELUDE,

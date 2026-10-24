@@ -997,6 +997,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         assert!(!doc.host.output_dir.as_os_str().is_empty());
         assert!(
             doc.host.kind.is_linux()
+                || doc.host.kind.is_windows()
                 || doc.host.kind.is_macos()
                 || matches!(doc.host.kind, kine_platform::PlatformKind::Other)
         );

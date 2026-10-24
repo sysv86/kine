@@ -39,7 +39,7 @@ impl RenderBackend {
     pub fn parse(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
             "auto" => Some(Self::Auto),
-            "gpu" | "wgpu" | "vulkan" | "metal" => Some(Self::Gpu),
+            "gpu" | "wgpu" | "vulkan" | "metal" | "dx12" | "d3d12" => Some(Self::Gpu),
             "cpu" | "software" => Some(Self::Cpu),
             _ => None,
         }
