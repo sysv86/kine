@@ -7,6 +7,7 @@ use kine_render::{FrameFormat, RenderBackend};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 
 pub fn dispatch(engine: &mut Engine, req: &Value) -> Value {
     let id = req.get("id").cloned().unwrap_or(Value::Null);
@@ -26,6 +27,35 @@ fn dispatch_inner(engine: &mut Engine, req: &Value) -> Result<Value, Value> {
         "doctor" => serde_json::to_value(engine.doctor()).map_err(engine_err),
 
         "types" => Ok(json!({"dts": kine_script::typescript_dts()})),
+
+        "modules" => {
+            let dir = params
+                .get("dir")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                });
+            let registry = kine_script::ModuleRegistry::discover(&dir)
+                .map_err(|e| json_err(&e.to_string()))?;
+            let list: Vec<Value> = registry
+                .iter()
+                .map(|(name, module)| {
+                    json!({
+                        "name": name,
+                        "kind": module.meta.kind,
+                        "description": module.meta.description,
+                        "params": module.meta.params,
+                        "entry": module.scene_path,
+                    })
+                })
+                .collect();
+            Ok(json!({
+                "root": registry.root().map(|p| p.to_string_lossy().into_owned()),
+                "count": registry.len(),
+                "modules": list,
+            }))
+        }
 
         "set_backend" => {
             let name = params

@@ -1,7 +1,7 @@
 //! Frame renderer for Kine: unified CPU (`vello_cpu` + `kine_shader::vm`) and
 //! GPU (`vello_gpu` + `wgpu`) rendering backends, video input decoding &
 //! caching (`video_io`), and multi-format output (`PNG`, `QOI`, `BMP`, `PPM`,
-//! `PAM`, `TGA`, `GIF89a`, `SVG`).
+//! `PAM`, `TGA`, `GIF89a`).
 
 pub mod formats;
 pub mod png;
@@ -12,7 +12,7 @@ pub mod gpu;
 
 pub use formats::{
     decode_any_image, encode_animated_gif, encode_pixmap, pixmap_to_bmp, pixmap_to_pam,
-    pixmap_to_ppm, pixmap_to_qoi, pixmap_to_straight_rgba, pixmap_to_tga, scene_to_svg,
+    pixmap_to_ppm, pixmap_to_qoi, pixmap_to_straight_rgba, pixmap_to_tga,
     FrameFormat,
 };
 pub use video_io::{

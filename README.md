@@ -22,7 +22,7 @@ The default build uses a 100% deterministic software rendering and encoding pipe
    - `StudioState` owns `kine_server::Engine`, `SceneHandle`, and the authored `kine_script::SceneDef` AST **in the same OS process**.
    - Every edit in the Design Inspector, NLE Timeline, Code Editor, or AI Agent Chat mutates `SceneDef` inside a checkpointed undo/redo transaction, rebuilds `kine_core::Scene` in-memory, evaluates animations & layout at the current playhead timestamp, and converts `vello_cpu::Pixmap` directly into `xilem::masonry::peniko::ImageData` (`AlphaPremultiplied` RGBA8) with zero IPC or process duplication.
 2. **Hyperframes-Style 4-Zone Workspace**:
-   - **Header Bar**: Active composition switcher, live static inspection badge, `Backend` selector (`AUTO`/`CPU`/`GPU`), `Capture PNG` / `Capture SVG`, `Ask AI Agent` prompt builder, Dock visibility toggle, and one-click `Render Export`.
+   - **Header Bar**: Active composition switcher, live static inspection badge, `Backend` selector (`AUTO`/`CPU`/`GPU`), `Capture PNG`, `Ask AI Agent` prompt builder, Dock visibility toggle, and one-click `Render Export`.
    - **Left Dock**:
      - `Compositions`: Built-in starter compositions + automatic discovery of `.ts` and `.json` scenes in `examples/`.
      - `Assets`: Fonts (`JetBrains Mono`), procedural patterns (`pattern:checkerboard`), procedural video clips (`video:testbars`), synthesized DSP audio beds (`synth:...`), and WGSL shader assets.
@@ -41,7 +41,7 @@ The default build uses a 100% deterministic software rendering and encoding pipe
        - `studio_look`, `studio_select`, `studio_seek`, `studio_frame`, `studio_inspect`
        - `studio_set_text`, `studio_set_style`, `studio_transform` (with read-back bounding-box verification)
        - `studio_add_animation`, `studio_update_animation`, `studio_add_keyframe`, `studio_delete_animation`
-     - `Renders` Queue: In-process multi-format export (`MP4`, `MKV`, `WebM`, `GIF`, `PNG`, `SVG`) with frame count, byte size, and output path history.
+     - `Renders` Queue: In-process multi-format export (`MP4`, `MKV`, `WebM`, `GIF`, `PNG`) with frame count, byte size, and output path history.
 
 ### Launching Kine Studio
 
@@ -69,12 +69,82 @@ cargo run --release -p kine-cli -- studio --headless-check
 The status bar shows the active backend and last rasterization time (`GPU · 5.4ms`).
 CPU is a fallback, not the default. Builds without `gpu` still work and print `CPU`.
 
+## Modules
+
+A project can ship ready-made elements — subtitles, widgets, transitions,
+animation blocks — and reuse them from any scene without copying the code.
+Modules live in a `Modules/` directory next to the scene:
+
+```text
+project/
+  scene.ts
+  Modules/
+    lower-third/
+      module.json
+      scene.ts
+```
+
+`module.json` describes the module; every field except the entry script is
+optional:
+
+```json
+{
+  "kind": "subtitle",
+  "description": "Broadcast lower third with title and subtitle",
+  "params": { "title": "UNTITLED", "subtitle": "" }
+}
+```
+
+`kind` is free-form (`subtitle`, `widget`, `transition`, `animation`, ...).
+`params` are the module's default props: they are merged under the call-site
+props, so `module("lower-third")` gets `UNTITLED` while
+`module("lower-third", { title: "Hello" })` overrides it. `scene.ts` must
+evaluate to a factory that takes the props and returns one scene node:
+
+```ts
+return (props) => container(
+  { position: "absolute", inset: { left: 40, bottom: 40 }, size: { width: 420, height: 72 } },
+  [
+    rect({ fill: props.accent || "#f5b642", size: { width: 8, height: 72 } }),
+    text(props.title || "UNTITLED", {
+      fontFamily: "JetBrains Mono",
+      fontSize: 34,
+      color: "#ffffff",
+      position: "absolute",
+      inset: { left: 24, top: 8 },
+      size: { width: 380, height: 44 },
+    }),
+  ]
+);
+```
+
+Use it like any other node; the module sees the same DSL globals as the scene:
+
+```ts
+container({ size: { width: W, height: H } }, [
+  module("lower-third", { title: "MODULE OK", subtitle: "ready-made element" }),
+]);
+```
+
+Rules:
+
+* the module name is its directory name (`Modules/lower-third` → `module("lower-third")`);
+* `module.json` is optional, `scene.ts` is not;
+* unknown or broken modules fail scene load with an error listing what is available;
+* modules are evaluated per scene load, before the scene body, so a scene can use any module without imports.
+
+List what a project offers:
+
+```sh
+kine modules --dir ./project
+```
+
 ## Workspace Architecture
 
 - `crates/kine-core` — Scene graph (`Scene`, `Node`, `NodeKind`), `taffy` layout integration, and keyframe animation curves (`Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `CubicBezier`, `Steps`, analytical `Spring`).
 - `crates/kine-text` — Pure-Rust font loading and text shaping (`cosmic-text`).
 - `crates/kine-shader` — WGSL shader validation (`naga`), uniform reflection, and deterministic multi-threaded CPU WGSL fragment VM.
-- `crates/kine-render` — Unified CPU (`vello_cpu`) and optional GPU (`vello_gpu` + `wgpu`) frame renderer, procedural/container video input cache, and multi-format still/vector export (`PNG`, `QOI`, `BMP`, `PPM`, `PAM`, `TGA`, `GIF89a`, `SVG`).
+- `crates/kine-render` — Unified CPU (`vello_cpu`) and optional GPU (`vello_gpu` + `wgpu`) frame renderer, procedural/container video input cache, and multi-format still export (`PNG`, `QOI`, `BMP`, `PPM`, `PAM`, `TGA`, `GIF89a`).
 - `crates/kine-encode` — Software AV1 (`rav1e`), `YUV4MPEG2` (`.y4m`), raw `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
 - `crates/kine-audio` — Waveform synthesis, file decoding (`symphonia`), resampling (`rubato`), biquad EQ, dynamic range compression, sidechain ducking, and `WAV`/`FLAC`/`AIFF` output.
 - `crates/kine-mux` — ISO-BMFF `.mp4` (`muxfin`) and Matroska `.mkv` / `.webm` muxers, plus optional hardware H.264 encoding (`gpu-video`).

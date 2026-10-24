@@ -442,10 +442,6 @@ fn header_bar(state: &mut StudioState, t: &StudioPalette) -> impl WidgetView<Stu
                 let _ = st.capture_current_frame(FrameFormat::Png, Path::new("studio-capture.png"));
             })
             .into_any_flex(),
-            icon_btn("download", t.text_soft, t, |st: &mut StudioState| {
-                let _ = st.capture_current_frame(FrameFormat::Svg, Path::new("studio-capture.svg"));
-            })
-            .into_any_flex(),
             divider(t).into_any_flex(),
             if state.inspector_visible {
                 icon_btn_on(inspector_icon, t, |st: &mut StudioState| {
@@ -689,6 +685,61 @@ fn asset_list(state: &mut StudioState, t: &StudioPalette) -> Boxed {
             .into_any_flex(),
         );
     }
+    let modules: Vec<(String, String, String)> = state
+        .module_registry
+        .iter()
+        .map(|(name, module)| {
+            (
+                name.to_string(),
+                module.meta.kind.clone(),
+                module.meta.description.clone(),
+            )
+        })
+        .collect();
+    if !modules.is_empty() {
+        rows.push(
+            sized_box(txtw(
+                "PROJECT MODULES",
+                9.0,
+                FontWeight::new(600.0),
+                t.muted,
+            ))
+            .padding(Padding::from_vh(6.0, 2.0))
+            .into_any_flex(),
+        );
+        for (name, kind, description) in modules {
+            let module_name = name.clone();
+            rows.push(
+                button(
+                    flex_col((
+                        flex_row((
+                            icon("widgets", 12.0, t.accent),
+                            txtw(name.clone(), 10.5, FontWeight::new(500.0), t.text),
+                            FlexSpacer::Flex(1.0),
+                            badge(kind, t.text, t.bg_raised),
+                        ))
+                        .gap(4.0_f64.px())
+                        .cross_axis_alignment(CrossAxisAlignment::Center),
+                        txt(clipped(&description, 34), 9.0, t.muted),
+                    ))
+                    .gap(1.0_f64.px()),
+                    move |st: &mut StudioState| {
+                        if let Err(e) = st.insert_module(&module_name) {
+                            st.status_banner = e.to_string();
+                        }
+                    },
+                )
+                .padding(Padding::from_vh(3.0, 6.0))
+                .corner_radius(5.0)
+                .background_color(t.bg_raised)
+                .active_background_color(t.press)
+                .border(t.border, 1.0)
+                .hovered_border_color(t.accent)
+                .into_any_flex(),
+            );
+        }
+    }
+
     flex_col(rows)
         .gap(2.0_f64.px())
         .cross_axis_alignment(CrossAxisAlignment::Fill)

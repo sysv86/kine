@@ -269,7 +269,6 @@ pub fn write_image_sequence_dir(
         crate::formats::FrameFormat::Ppm => "ppm",
         crate::formats::FrameFormat::Pam => "pam",
         crate::formats::FrameFormat::Tga => "tga",
-        crate::formats::FrameFormat::Svg => "svg",
     };
     let mut written = Vec::with_capacity(frames.len());
     for (i, pixmap) in frames.iter().enumerate() {

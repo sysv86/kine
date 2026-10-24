@@ -16,6 +16,7 @@ fn usage() -> &'static str {
 USAGE:
   kine new        --out <scene.json>          write a starter scene template
   kine types      [--out <kine.d.ts>]         emit TypeScript .d.ts schema for the DSL
+  kine modules    [--dir <project>]           list ready-made modules from <project>/Modules
   kine doctor                                 print engine, GPU/CPU, format & host diagnostics
   kine host                                   print platform/storage policy (JSON)
   kine tone       --out <file.wav|file.flac|file.aiff>
@@ -31,7 +32,7 @@ USAGE:
                                               validate WGSL now, print its bindings
   kine render     --scene <scene>
                   --out <file|dir/|->
-                  [--format mp4|mkv|webm|y4m|gif|kvid|rgba|i420|nv12|png|qoi|bmp|ppm|pam|tga|svg]
+                  [--format mp4|mkv|webm|y4m|gif|kvid|rgba|i420|nv12|png|qoi|bmp|ppm|pam|tga]
                   [--seq] [--frame N] [--frames N] [--fps 30] [--quality Q] [--speed 0-10]
                   [--encoder av1|h264-hw|h264-zero-copy] [--bitrate BPS]
                   [--backend auto|gpu|cpu]
@@ -320,6 +321,39 @@ fn main() -> ExitCode {
             }
         }
 
+        "modules" => {
+            let dir = flag("--dir")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            match kine_script::ModuleRegistry::discover(&dir) {
+                Ok(registry) => {
+                    let list: Vec<serde_json::Value> = registry
+                        .iter()
+                        .map(|(name, module)| {
+                            serde_json::json!({
+                                "name": name,
+                                "kind": module.meta.kind,
+                                "description": module.meta.description,
+                                "params": module.meta.params,
+                                "entry": module.scene_path,
+                            })
+                        })
+                        .collect();
+                    let out = serde_json::json!({
+                        "root": registry.root().map(|p| p.to_string_lossy().into_owned()),
+                        "count": registry.len(),
+                        "modules": list,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("modules error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+
         "doctor" => {
             let doc = engine.doctor();
             println!("{}", serde_json::to_string_pretty(&doc).unwrap());
@@ -414,10 +448,13 @@ fn main() -> ExitCode {
             if is_seq_dir {
                 let frames_count: u64 = flag_or("--frames", "60").parse().unwrap_or(60);
                 let fps: f64 = flag_or("--fps", "30").parse::<f64>().unwrap_or(30.0).max(1.0);
-                let frame_fmt = explicit_fmt
-                    .as_deref()
-                    .and_then(FrameFormat::from_extension)
-                    .unwrap_or(FrameFormat::Png);
+                let frame_fmt = match frame_format_for(&out, explicit_fmt.as_deref()) {
+                    Ok(fmt) => fmt,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
                 let mut pixmaps = Vec::with_capacity(frames_count as usize);
                 for f in 0..frames_count {
                     let t = (f as f64) / fps;
@@ -556,15 +593,13 @@ fn main() -> ExitCode {
                 }
             } else {
                 let frame: u64 = flag_or("--frame", "0").parse().unwrap_or(0);
-                let format = explicit_fmt
-                    .as_deref()
-                    .and_then(FrameFormat::from_extension)
-                    .or_else(|| {
-                        out.extension()
-                            .and_then(|e| e.to_str())
-                            .and_then(FrameFormat::from_extension)
-                    })
-                    .unwrap_or(FrameFormat::Png);
+                let format = match frame_format_for(&out, explicit_fmt.as_deref()) {
+                    Ok(fmt) => fmt,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
                 match engine.render_frame_format(handle, frame, format) {
                     Ok(bytes) => {
                         if is_stdout {
@@ -798,31 +833,35 @@ fn read_file_bytes(path: &str) -> Vec<u8> {
     })
 }
 
+/// Resolve the still-frame format from `--format` or the output extension.
+///
+/// An explicit but unsupported format is an error: writing PNG bytes into a
+/// `.txt` file (or any other unknown extension) would look like success.
+fn frame_format_for(out: &Path, explicit: Option<&str>) -> Result<FrameFormat, String> {
+    if let Some(name) = explicit {
+        return FrameFormat::from_extension(name)
+            .ok_or_else(|| format!("unknown frame format {name:?} (png, qoi, bmp, ppm, pam, tga)"));
+    }
+    match out.extension().and_then(|e| e.to_str()) {
+        Some(ext) => FrameFormat::from_extension(ext)
+            .ok_or_else(|| format!("unknown frame format {ext:?} (png, qoi, bmp, ppm, pam, tga)")),
+        None => Ok(FrameFormat::Png),
+    }
+}
+
 fn load(engine: &mut Engine, path: &str) -> SceneHandle {
     let source = read_file(path);
-    let is_script = path.ends_with(".ts") || path.ends_with(".js");
-
     let base = Path::new(path)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let loaded = if is_script {
-        kine_script::eval_scene_def_ts(&source)
-            .map_err(|e| e.to_string())
-            .and_then(|def| serde_json::to_string(&def).map_err(|e| e.to_string()))
-    } else {
-        Ok(source)
-    };
-
-    let json = loaded.unwrap_or_else(|e: String| {
-        eprintln!("scene load error ({path}): {e}");
-        std::process::exit(1);
-    });
-
+    // The engine handles both JSON and TypeScript; routing scripts through it
+    // keeps `module("name", props)` working, since it discovers `<base>/Modules`
+    // before evaluating the scene body.
     engine
-        .load_scene_json_with_base(&json, &base)
+        .load_scene_json_with_base(&source, &base)
         .unwrap_or_else(|e| {
             eprintln!("scene load error ({path}): {e}");
             std::process::exit(1);

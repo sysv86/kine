@@ -1,0 +1,5 @@
+{
+  "kind": "subtitle",
+  "description": "Broadcast lower third with title and subtitle",
+  "params": { "title": "UNTITLED", "subtitle": "", "accent": "#f5b642" }
+}

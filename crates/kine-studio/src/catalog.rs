@@ -80,7 +80,7 @@ pub const CATALOG_ITEMS: &[CatalogItem] = &[
     CatalogItem {
         id: "svg-path-star",
         category: "Vector",
-        label: "SVG Vector Star",
+        label: "Vector Star",
         description: "Crisp Bezier/polygon vector path rendered via vello.",
     },
     CatalogItem {
@@ -451,7 +451,8 @@ pub fn default_compositions(workspace_root: Option<&Path>) -> Vec<CompositionEnt
         CompositionEntry {
             id: "kinetic-hero".to_string(),
             title: "01 // Kinetic Hero Title".to_string(),
-            subtitle: "640x360 · 30fps · Multi-track keyframe animation + gradient card".to_string(),
+            subtitle: "640x360 · 30fps · Multi-track keyframe animation + gradient card"
+                .to_string(),
             source_path: None,
             scene_def: starter_kinetic_scene(),
         },
@@ -488,7 +489,14 @@ pub fn default_compositions(workspace_root: Option<&Path>) -> Vec<CompositionEnt
                     let parsed = if src.trim_start().starts_with('{') {
                         serde_json::from_str::<SceneDef>(&src).ok()
                     } else {
-                        kine_script::eval_scene_def_ts(&src).ok()
+                        let base = path
+                            .parent()
+                            .filter(|p| !p.as_os_str().is_empty())
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| root.to_path_buf());
+                        kine_script::ModuleRegistry::discover(&base)
+                            .ok()
+                            .and_then(|registry| registry.eval_scene_ts(&src).ok())
                     };
                     if let Some(scene_def) = parsed {
                         let stem = path
@@ -503,9 +511,7 @@ pub fn default_compositions(workspace_root: Option<&Path>) -> Vec<CompositionEnt
                                 "{}x{} · {}",
                                 scene_def.width,
                                 scene_def.height,
-                                path.file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("scene")
+                                path.file_name().and_then(|s| s.to_str()).unwrap_or("scene")
                             ),
                             source_path: Some(path),
                             scene_def,

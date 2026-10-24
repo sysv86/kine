@@ -120,6 +120,10 @@ pub struct StudioState {
     pub compositions: Vec<CompositionEntry>,
     pub active_composition: usize,
     pub assets: Vec<AssetEntry>,
+    /// Ready-made modules discovered in the current project's `Modules/` folder.
+    pub module_registry: kine_script::ModuleRegistry,
+    /// Directory whose `Modules/` library is currently loaded.
+    module_dir: Option<PathBuf>,
     pub left_tab: LeftDockTab,
     pub right_tab: RightDockTab,
     pub inspector_visible: bool,
@@ -194,6 +198,11 @@ impl StudioState {
         let mut engine = Engine::new();
         engine.load_font("JetBrains Mono", BUNDLED_FONT.to_vec());
 
+        let module_base = workspace_root
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let module_registry =
+            kine_script::ModuleRegistry::discover(&module_base).unwrap_or_default();
         let compositions = default_compositions(workspace_root.as_deref());
         let initial_def = compositions
             .first()
@@ -220,6 +229,8 @@ impl StudioState {
             compositions,
             active_composition: 0,
             assets: default_assets(),
+            module_registry,
+            module_dir: Some(module_base),
             left_tab: LeftDockTab::Compositions,
             right_tab: RightDockTab::Design,
             inspector_visible: true,
@@ -271,15 +282,55 @@ impl StudioState {
         state
     }
 
+    /// Base directory used to discover `Modules/` for the active project.
+    fn module_base(&self) -> PathBuf {
+        if let Some(dir) = &self.module_dir {
+            return dir.clone();
+        }
+        if let Some(root) = &self.workspace_root {
+            return root.clone();
+        }
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    }
+
+    /// Reload the project module library from `base/Modules`.
+    pub fn reload_modules(&mut self, base: &Path) -> Result<(), StudioError> {
+        self.module_registry = kine_script::ModuleRegistry::discover(base)
+            .map_err(|e| StudioError::Message(e.to_string()))?;
+        self.module_dir = Some(base.to_path_buf());
+        Ok(())
+    }
+
+    /// Instantiate a ready-made module and append it to the scene root.
+    pub fn insert_module(&mut self, name: &str) -> Result<(), StudioError> {
+        let node = self
+            .module_registry
+            .instantiate(name, serde_json::json!({}))
+            .map_err(|e| StudioError::Message(e.to_string()))?;
+        self.commit_mutation(format!("Insert module {name}"), move |def| {
+            def.root.children.get_or_insert_with(Vec::new).push(node);
+            Ok(())
+        })?;
+        self.status_banner = format!("Inserted module {name}");
+        Ok(())
+    }
+
     /// Load a `.ts` or `.json` scene file from disk into the studio.
     pub fn load_scene_file(&mut self, path: &Path) -> Result<(), StudioError> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| StudioError::Message(format!("read {}: {e}", path.display())))?;
+        let base = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.module_base());
+        self.reload_modules(&base)?;
         let def: SceneDef = if content.trim_start().starts_with('{') {
             serde_json::from_str(&content)
                 .map_err(|e| StudioError::Message(format!("parse JSON {}: {e}", path.display())))?
         } else {
-            kine_script::eval_scene_def_ts(&content)
+            self.module_registry
+                .eval_scene_ts(&content)
                 .map_err(|e| StudioError::Message(format!("eval TS {}: {e}", path.display())))?
         };
         self.scene_def = def.clone();
@@ -302,6 +353,14 @@ impl StudioState {
             )));
         };
         self.active_composition = index;
+        if let Some(base) = entry
+            .source_path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .map(Path::to_path_buf)
+        {
+            let _ = self.reload_modules(&base);
+        }
         self.scene_def = entry.scene_def;
         self.source_buffer =
             serde_json::to_string_pretty(&self.scene_def).unwrap_or_else(|_| "{}".to_string());
@@ -693,11 +752,14 @@ impl StudioState {
     pub fn apply_source_buffer(&mut self) -> Result<(), StudioError> {
         let src = self.source_buffer.clone();
         let trimmed = src.trim_start();
+        let base = self.module_base();
+        self.reload_modules(&base)?;
         let parsed: SceneDef = if trimmed.starts_with('{') {
             serde_json::from_str(&src)
                 .map_err(|e| StudioError::Message(format!("JSON syntax error: {e}")))?
         } else {
-            kine_script::eval_scene_def_ts(&src)
+            self.module_registry
+                .eval_scene_ts(&src)
                 .map_err(|e| StudioError::Message(format!("TypeScript error: {e}")))?
         };
         self.commit_mutation("Apply Code Editor changes", move |def| {
@@ -761,7 +823,7 @@ impl StudioState {
 
     // ── Frame Capture & Render Queue Export ────────────────────────────────
 
-    /// Capture the current playhead frame to disk (`PNG` or `SVG`).
+    /// Capture the current playhead frame to disk (`PNG`).
     pub fn capture_current_frame(
         &mut self,
         format: FrameFormat,
@@ -784,7 +846,7 @@ impl StudioState {
         Ok(resolved)
     }
 
-    /// Run a full composition export (`MP4`, `MKV`, `WebM`, `Y4M`, `GIF`, `KVID`, `PNG`, `SVG`)
+    /// Run a full composition export (`MP4`, `MKV`, `WebM`, `Y4M`, `GIF`, `KVID`, `PNG`)
     /// directly in-process and record the result in `self.render_queue`.
     pub fn run_export_job(&mut self) -> Result<RenderQueueJob, StudioError> {
         let host = PlatformInfo::detect();
@@ -801,16 +863,11 @@ impl StudioState {
         let job_id = self.next_job_id;
         self.next_job_id += 1;
 
-        if fmt == "png" || fmt == "svg" {
-            let ffmt = if fmt == "svg" {
-                FrameFormat::Svg
-            } else {
-                FrameFormat::Png
-            };
+        if fmt == "png" {
             let bytes = self.engine.render_frame_format(
                 self.scene_handle,
                 u64::from(self.current_frame_index()),
-                ffmt,
+                FrameFormat::Png,
             )?;
             write_output(&out_path, &bytes)
                 .map_err(|e| StudioError::Message(format!("write {}: {e}", out_path.display())))?;

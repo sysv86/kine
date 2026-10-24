@@ -4,6 +4,7 @@
 //! evaluation of a typed DSL → JSON scene description → [`kine_core::Scene`].
 
 pub mod authoring;
+pub mod modules;
 pub mod runtime;
 pub mod transpile;
 
@@ -12,8 +13,12 @@ pub use authoring::{
     CompressorDef, EdgesDef, EqBandDef, GradientDef, GradientStopDef, KeyframeDef, NodeDef,
     SceneDef, SizeDef,
 };
+pub use modules::{
+    Module, ModuleError, ModuleMeta, ModuleRegistry, MODULES_DIR,
+};
 pub use runtime::{
-    eval_scene_def_js, eval_scene_def_ts, eval_scene_js, eval_scene_ts, PRELUDE,
+    eval_module_node_ts, eval_scene_def_js, eval_scene_def_ts, eval_scene_def_ts_with_modules,
+    eval_scene_js, eval_scene_ts, ModuleSource, PRELUDE,
 };
 pub use transpile::transpile_ts;
 
@@ -231,6 +236,7 @@ declare global {
   function video(src: string, opts?: VideoProps): SceneNode;
   function text(content: string, opts?: TextProps): SceneNode;
   function shader(wgsl: string, opts?: ShaderProps): SceneNode;
+  function module(name: string, props?: Record<string, unknown>): SceneNode;
   function linearGradient(angle: number, stops: GradientStopSpec[]): GradientSpec;
   function radialGradient(stops: GradientStopSpec[]): GradientSpec;
   function spring(stiffness?: number, damping?: number): EasingName;

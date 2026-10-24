@@ -1,5 +1,4 @@
-//! Multi-format still image, animated GIF89a, and SVG vector encoders/decoders
-//! in pure Rust:
+//! Multi-format still image and animated GIF89a encoders/decoders in pure Rust:
 //! * **PNG** (`.png`) — straight-alpha RGBA8 via `image`.
 //! * **QOI** (`.qoi`) — Quite OK Image v1.0 lossless O(N) RGBA8 encoder & decoder.
 //! * **BMP** (`.bmp`) — 32-bit BGRA BITMAPINFOHEADER encoder & 24/32-bit decoder.
@@ -7,11 +6,8 @@
 //! * **TGA** (`.tga`) — 32-bit Truevision TARGA RGBA8 encoder & decoder.
 //! * **GIF89a** (`.gif`) — multi-frame animated GIF89a encoder with 6×6×6+grayscale
 //!   palette, ordered Bayer 4×4 dithering, and variable-width LZW compression.
-//! * **SVG** (`.svg`) — clean vector export of laid-out [`kine_core::Scene`] trees.
 
 use crate::png::pixmap_to_png;
-use crate::{combine_transforms, sample_gradient_stops};
-use kine_core::{Gradient, NodeId, NodeKind, Scene, TextAlign, Transform2D};
 use vello_cpu::Pixmap;
 
 /// Supported still-frame output formats.
@@ -23,7 +19,6 @@ pub enum FrameFormat {
     Ppm,
     Pam,
     Tga,
-    Svg,
 }
 
 impl FrameFormat {
@@ -35,7 +30,6 @@ impl FrameFormat {
             "ppm" | "pnm" => Some(Self::Ppm),
             "pam" => Some(Self::Pam),
             "tga" => Some(Self::Tga),
-            "svg" => Some(Self::Svg),
             _ => None,
         }
     }
@@ -69,7 +63,6 @@ pub fn encode_pixmap(pixmap: &Pixmap, format: FrameFormat) -> Result<Vec<u8>, St
         FrameFormat::Ppm => Ok(pixmap_to_ppm(pixmap)),
         FrameFormat::Pam => Ok(pixmap_to_pam(pixmap)),
         FrameFormat::Tga => Ok(pixmap_to_tga(pixmap)),
-        FrameFormat::Svg => Err("SVG export operates on a Scene; call scene_to_svg".into()),
     }
 }
 
@@ -565,222 +558,6 @@ fn lzw_encode_gif_blocks(indices: &[u8], out: &mut Vec<u8>) {
         out.extend_from_slice(chunk);
     }
     out.push(0);
-}
-
-// ── SVG Vector Export (`scene_to_svg`) ──────────────────────────────────────
-
-/// Export a laid-out [`Scene`] directly into a clean, standalone SVG 1.1 document.
-pub fn scene_to_svg(scene: &Scene) -> Result<String, String> {
-    let mut defs = String::new();
-    let mut body = String::new();
-    let mut grad_counter = 0usize;
-
-    render_node_svg(
-        scene,
-        scene.root,
-        1.0,
-        Transform2D::IDENTITY,
-        &mut defs,
-        &mut body,
-        &mut grad_counter,
-    )?;
-
-    let mut svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">"#,
-        w = scene.width,
-        h = scene.height
-    );
-    svg.push('\n');
-    if !defs.is_empty() {
-        svg.push_str("  <defs>\n");
-        svg.push_str(&defs);
-        svg.push_str("  </defs>\n");
-    }
-    svg.push_str(&body);
-    svg.push_str("</svg>\n");
-    Ok(svg)
-}
-
-fn color_css(c: kine_core::Color) -> String {
-    if c.a == 255 {
-        format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
-    } else {
-        format!(
-            "rgba({},{},{},{:.3})",
-            c.r,
-            c.g,
-            c.b,
-            f32::from(c.a) / 255.0
-        )
-    }
-}
-
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
-fn render_node_svg(
-    scene: &Scene,
-    node_id: NodeId,
-    parent_opacity: f32,
-    parent_transform: Transform2D,
-    defs: &mut String,
-    body: &mut String,
-    grad_counter: &mut usize,
-) -> Result<(), String> {
-    let node = scene
-        .nodes
-        .get(&node_id)
-        .ok_or_else(|| format!("missing node {}", node_id.0))?;
-    let rect = node
-        .abs_pos
-        .ok_or_else(|| "scene layout not computed".to_string())?;
-    let opacity = (parent_opacity * node.opacity).clamp(0.0, 1.0);
-    if opacity <= 0.0 {
-        return Ok(());
-    }
-    let tr = combine_transforms(parent_transform, node.transform);
-    let (cx, cy) = rect.center();
-    let transform_attr = if tr.is_identity() {
-        String::new()
-    } else {
-        format!(
-            r#" transform="translate({:.2} {:.2}) translate({:.2} {:.2}) rotate({:.2}) scale({:.3} {:.3}) translate({:.2} {:.2})""#,
-            tr.translate_x, tr.translate_y, cx, cy, tr.rotation_deg, tr.scale_x, tr.scale_y, -cx, -cy
-        )
-    };
-    let opacity_attr = if (opacity - 1.0).abs() < 1e-4 {
-        String::new()
-    } else {
-        format!(r#" opacity="{opacity:.3}""#)
-    };
-    let stroke_attr = match &node.stroke {
-        Some(s) if s.width > 0.0 => format!(
-            r#" stroke="{}" stroke-width="{:.2}""#,
-            color_css(s.color),
-            s.width
-        ),
-        _ => String::new(),
-    };
-
-    let fill_ref = |default_color: kine_core::Color,
-                    grad: Option<&Gradient>,
-                    defs: &mut String,
-                    counter: &mut usize|
-     -> String {
-        if let Some(g) = grad {
-            *counter += 1;
-            let gid = format!("kine-grad-{}", *counter);
-            match g {
-                Gradient::Linear { angle_deg, stops } => {
-                    defs.push_str(&format!(
-                        r#"    <linearGradient id="{gid}" gradientTransform="rotate({angle_deg:.1} 0.5 0.5)">"#
-                    ));
-                    defs.push('\n');
-                    for st in stops {
-                        defs.push_str(&format!(
-                            r#"      <stop offset="{:.1}%" stop-color="{}"/>"#,
-                            st.offset * 100.0,
-                            color_css(st.color)
-                        ));
-                        defs.push('\n');
-                    }
-                    defs.push_str("    </linearGradient>\n");
-                }
-                Gradient::Radial { stops } => {
-                    defs.push_str(&format!(r#"    <radialGradient id="{gid}">"#));
-                    defs.push('\n');
-                    for st in stops {
-                        defs.push_str(&format!(
-                            r#"      <stop offset="{:.1}%" stop-color="{}"/>"#,
-                            st.offset * 100.0,
-                            color_css(st.color)
-                        ));
-                        defs.push('\n');
-                    }
-                    defs.push_str("    </radialGradient>\n");
-                }
-            }
-            let _ = sample_gradient_stops;
-            format!("url(#{gid})")
-        } else {
-            color_css(default_color)
-        }
-    };
-
-    match &node.kind {
-        NodeKind::Container
-        | NodeKind::Shader { .. }
-        | NodeKind::Image { .. }
-        | NodeKind::Video { .. } => {}
-        NodeKind::Rect {
-            fill,
-            corner_radius,
-        } => {
-            let f_str = fill_ref(*fill, node.gradient.as_ref(), defs, grad_counter);
-            let rx = if *corner_radius > 0.0 {
-                format!(r#" rx="{:.2}""#, corner_radius)
-            } else {
-                String::new()
-            };
-            body.push_str(&format!(
-                r#"  <rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}"{rx} fill="{f_str}"{stroke_attr}{opacity_attr}{transform_attr}/>"#,
-                rect.x, rect.y, rect.width, rect.height
-            ));
-            body.push('\n');
-        }
-        NodeKind::Circle { fill, radius } => {
-            let f_str = fill_ref(*fill, node.gradient.as_ref(), defs, grad_counter);
-            let r = radius.unwrap_or_else(|| rect.width.min(rect.height) * 0.5);
-            body.push_str(&format!(
-                r#"  <circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{f_str}"{stroke_attr}{opacity_attr}{transform_attr}/>"#,
-                cx, cy, r
-            ));
-            body.push('\n');
-        }
-        NodeKind::Path { d, fill } => {
-            let f_str = fill.map(color_css).unwrap_or_else(|| "none".into());
-            body.push_str(&format!(
-                r#"  <path d="{}" fill="{f_str}"{stroke_attr}{opacity_attr}{transform_attr}/>"#,
-                xml_escape(d)
-            ));
-            body.push('\n');
-        }
-        NodeKind::Text {
-            content,
-            font_family,
-            font_size,
-            font_weight,
-            color,
-            align,
-        } => {
-            let (tx, anchor) = match align {
-                TextAlign::Left => (rect.x, "start"),
-                TextAlign::Center => (rect.x + rect.width * 0.5, "middle"),
-                TextAlign::Right => (rect.x + rect.width, "end"),
-            };
-            let ty = rect.y + font_size * 0.85;
-            body.push_str(&format!(
-                r#"  <text x="{:.2}" y="{:.2}" font-family="{}" font-size="{:.1}" font-weight="{}" fill="{}" text-anchor="{anchor}"{opacity_attr}{transform_attr}>{}</text>"#,
-                tx,
-                ty,
-                xml_escape(font_family),
-                font_size,
-                font_weight,
-                color_css(*color),
-                xml_escape(content)
-            ));
-            body.push('\n');
-        }
-    }
-
-    for &child in &node.children {
-        render_node_svg(scene, child, opacity, tr, defs, body, grad_counter)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

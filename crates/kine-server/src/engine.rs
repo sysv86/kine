@@ -1,13 +1,13 @@
 //! Engine: scene registry + dual-backend frame rendering (GPU `vello_gpu` /
 //! CPU `vello_cpu` + `kine_shader::vm`) + multi-format export (`PNG`, `QOI`,
-//! `BMP`, `PPM`, `PAM`, `TGA`, `SVG`) + static inspection + contact-sheet
+//! `BMP`, `PPM`, `PAM`, `TGA`) + static inspection + contact-sheet
 //! (`strip` / `onion`) + pixel-diff gate + diagnostics.
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use kine_core::{NodeId, NodeKind, Scene};
 use kine_render::{
-    encode_pixmap, png, scene_to_svg, FrameFormat, FrameRenderer, RasterPixmap, RenderBackend,
+    encode_pixmap, png, FrameFormat, FrameRenderer, RasterPixmap, RenderBackend,
     RenderError,
 };
 use serde::{Deserialize, Serialize};
@@ -185,7 +185,19 @@ impl Engine {
         let def: kine_script::SceneDef = if trimmed.starts_with('{') {
             serde_json::from_str(source)?
         } else {
-            kine_script::eval_scene_def_ts(source)
+            // Scene scripts may use `module("name", props)`; the library is
+            // whatever lives in `<base_dir>/Modules`.
+            let registry = kine_script::ModuleRegistry::discover(base_dir)
+                .map_err(|e| EngineError::Definition(e.to_string()))?;
+            let modules: Vec<kine_script::ModuleSource> = registry
+                .iter()
+                .map(|(name, module)| kine_script::ModuleSource {
+                    name: name.to_string(),
+                    source_ts: module.source.clone(),
+                    defaults: module.meta.params.clone(),
+                })
+                .collect();
+            kine_script::eval_scene_def_ts_with_modules(source, &modules)
                 .map_err(|e| EngineError::Definition(e.to_string()))?
         };
         let audio = def.audio.clone();
@@ -265,7 +277,7 @@ impl Engine {
     }
 
     /// Render one frame in the requested [`FrameFormat`] (`PNG`, `QOI`, `BMP`,
-    /// `PPM`, `PAM`, `TGA`, or vector `SVG`).
+    /// `PPM`, `PAM`, `TGA`).
     pub fn render_frame_format(
         &mut self,
         handle: SceneHandle,
@@ -273,11 +285,6 @@ impl Engine {
         format: FrameFormat,
     ) -> Result<Vec<u8>, EngineError> {
         let time = frame as f64 / 30.0;
-        if format == FrameFormat::Svg {
-            let scene = self.scene_at(handle, time)?;
-            let svg = scene_to_svg(scene).map_err(EngineError::Format)?;
-            return Ok(svg.into_bytes());
-        }
         let pixmap = self.render_frame_at_with_index(handle, time, frame as u32)?;
         encode_pixmap(&pixmap, format).map_err(EngineError::Format)
     }
@@ -722,7 +729,7 @@ impl Engine {
             cpu_shader_vm: true,
             formats: vec![
                 "mp4", "mkv", "webm", "y4m", "gif", "kvid", "rgba", "i420", "nv12", "png", "qoi",
-                "bmp", "ppm", "pam", "tga", "svg", "wav", "flac", "aiff",
+                "bmp", "ppm", "pam", "tga", "wav", "flac", "aiff",
             ],
             fonts: self
                 .renderer
@@ -797,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_png_qoi_bmp_svg_via_engine() {
+    fn renders_png_qoi_bmp_via_engine() {
         let (mut engine, handle) = engine_with_scene();
         let png_bytes = engine.render_frame_png(handle, 0).unwrap();
         assert_eq!(&png_bytes[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
@@ -811,12 +818,6 @@ mod tests {
             .render_frame_format(handle, 0, FrameFormat::Bmp)
             .unwrap();
         assert_eq!(&bmp_bytes[..2], b"BM");
-
-        let svg_bytes = engine
-            .render_frame_format(handle, 0, FrameFormat::Svg)
-            .unwrap();
-        let svg_str = String::from_utf8(svg_bytes).unwrap();
-        assert!(svg_str.contains("<svg") && svg_str.contains("agent loop"));
     }
 
     #[test]

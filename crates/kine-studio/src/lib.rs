@@ -196,6 +196,43 @@ mod tests {
     }
 
     #[test]
+    fn studio_loads_a_module_scene_and_inserts_a_module() {
+        let root = std::env::temp_dir().join(format!("kine-studio-modules-{}", std::process::id()));
+        let module_dir = root.join("Modules").join("badge");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&module_dir).unwrap();
+        std::fs::write(
+            module_dir.join("module.json"),
+            r#"{"kind":"widget","params":{"title":"DEFAULT"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            module_dir.join("scene.ts"),
+            r#"return (props) => text(props.title || "NONE", { fontSize: 12 });"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("scene.ts"),
+            r#"return scene(64, 64, container({ size: { width: 64, height: 64 } }, [
+                module("badge", { title: "LIVE" })
+            ]));"#,
+        )
+        .unwrap();
+
+        let mut state = StudioState::new(Some(root.clone()));
+        state.load_scene_file(&root.join("scene.ts")).unwrap();
+        let before = state.scene_def.root.children.as_ref().map_or(0, Vec::len);
+        assert!(before > 0, "module scene must produce children");
+
+        state.insert_module("badge").unwrap();
+        let after = state.scene_def.root.children.as_ref().map_or(0, Vec::len);
+        assert_eq!(after, before + 1);
+        assert_eq!(state.module_registry.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn audio_meter_sampling_respects_mute_and_volume() {
         let (l, r) = sample_audio_meter_levels(true, false, 0.85, 0.5);
         assert!(l > 0.0 && r > 0.0);
