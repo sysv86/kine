@@ -8,7 +8,7 @@
 //! * Optional Audio track #2: `A_FLAC` (with `fLaC` + 34-byte STREAMINFO
 //!   metadata block as CodecPrivate).
 
-use crate::{AudioSpec, Codec, MuxError};
+use crate::{annexb_to_vvcc_packets, build_vvcc_record, AudioSpec, Codec, MuxError};
 use std::io::Write;
 
 /// Container DocType written in the EBML header.
@@ -132,6 +132,14 @@ impl<W: Write> MkvMuxer<W> {
                 }
                 avcc_nals
             }
+            Codec::H266 => {
+                let (params, vvcc_nals) = annexb_to_vvcc_packets(data);
+                if self.video_codec_private.is_none() && params.has_core_sets() {
+                    self.video_codec_private =
+                        Some(build_vvcc_record(&params, self.width, self.height));
+                }
+                vvcc_nals
+            }
         };
 
         self.packets.push(QueuedPacket {
@@ -214,6 +222,7 @@ impl<W: Write> MkvMuxer<W> {
         let codec_id = match self.codec {
             Codec::Av1 => "V_AV1",
             Codec::H264 => "V_MPEG4/ISO/AVC",
+            Codec::H266 => "V_MPEGH/ISO/VVC",
         };
         write_str_el(&mut v_entry, &[0x86], codec_id);
         if let Some(priv_bytes) = &self.video_codec_private {
@@ -475,5 +484,27 @@ mod tests {
         assert!(bytes.windows(8).any(|w| w == b"matroska"));
         assert!(bytes.windows(5).any(|w| w == b"V_AV1"));
         assert!(bytes.windows(6).any(|w| w == b"A_FLAC"));
+    }
+
+    #[test]
+    fn muxes_h266_vvc_into_mkv_with_vvcc_codec_private() {
+        let mut mkv = MkvMuxer::new(
+            Vec::new(),
+            EbmlDocType::Matroska,
+            Codec::H266,
+            640,
+            360,
+            30,
+            1,
+        );
+        let mut keyframe = Vec::new();
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x71, 0x10, 0x00]); // VPS(14)
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x79, 0x00, 0x30, 0x02, 0x33]); // SPS(15)
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x81, 0x00, 0x40]); // PPS(16)
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x41, 0x80, 0xAA]); // IDR_N_LP(8)
+        mkv.push_video(0, &keyframe, true).unwrap();
+        let bytes = mkv.finalize().unwrap();
+        assert_eq!(&bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
+        assert!(bytes.windows(15).any(|w| w == b"V_MPEGH/ISO/VVC"));
     }
 }

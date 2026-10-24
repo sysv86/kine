@@ -34,7 +34,7 @@ USAGE:
                   --out <file|dir/|->
                   [--format mp4|mkv|webm|y4m|gif|kvid|rgba|i420|nv12|png|qoi|bmp|ppm|pam|tga]
                   [--seq] [--frame N] [--frames N] [--fps 30] [--quality Q] [--speed 0-10]
-                  [--encoder av1|h264-hw|h264-zero-copy] [--bitrate BPS]
+                  [--encoder av1|h266|vvc|h264-hw|h264-zero-copy] [--bitrate BPS]
                   [--backend auto|gpu|cpu]
   kine strip      --scene <scene> --out <strip.png> [--frames 6] [--fps 30]
   kine onion      --scene <scene> --out <onion.png> [--frames 6] [--fps 30]
@@ -529,6 +529,9 @@ fn main() -> ExitCode {
                 let requested = flag_or("--encoder", "av1");
                 match requested.to_ascii_lowercase().as_str() {
                     "av1" | "software" => opts.encoder = VideoEncoder::Av1Software,
+                    "h266" | "vvc" | "h266-sw" | "vvc-sw" => {
+                        opts.encoder = VideoEncoder::H266Software
+                    }
                     #[cfg(feature = "hwencode")]
                     "h264-hw" | "hardware" | "h264" => opts.encoder = VideoEncoder::H264Hardware,
                     #[cfg(not(feature = "hwencode"))]
@@ -551,7 +554,7 @@ fn main() -> ExitCode {
                     }
                     other => {
                         eprintln!(
-                            "unknown encoder {other:?} (expected av1, h264-hw or h264-zero-copy)"
+                            "unknown encoder {other:?} (expected av1, h266/vvc, h264-hw or h264-zero-copy)"
                         );
                         return ExitCode::FAILURE;
                     }

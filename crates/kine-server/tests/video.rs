@@ -1,7 +1,7 @@
 //! End-to-end video output (MP4, MKV, WebM, Y4M, GIF, KVID, Raw) and video input
 //! (`NodeKind::Video`, `decode_video_source`, `transcode_video_clip`) tests.
 
-use kine_server::{Engine, VideoContainer, VideoOptions};
+use kine_server::{Engine, VideoContainer, VideoEncoder, VideoOptions};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn scratch_dir(tag: &str) -> std::path::PathBuf {
@@ -413,4 +413,46 @@ fn a_scene_without_audio_writes_no_audio_track() {
     let report = kine_server::render_video(&mut engine, handle, &opts).expect("video");
     assert_eq!(report.audio_frames, 0);
     assert_eq!(report.audio_samples, 0);
+}
+
+#[test]
+fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
+    let (mut engine, handle) = engine_with(&animated_scene_json());
+
+    let mp4_opts = VideoOptions {
+        encoder: VideoEncoder::H266Software,
+        container: VideoContainer::Mp4,
+        frames: 8,
+        fps_num: 24,
+        fps_den: 1,
+        quantizer: 80,
+        speed: 9,
+        keyframe_interval: 4,
+        ..Default::default()
+    };
+    let mp4_report = kine_server::render_video(&mut engine, handle, &mp4_opts).expect("h266 mp4");
+    assert_eq!(mp4_report.encoder, VideoEncoder::H266Software);
+    assert_eq!(mp4_report.frames, 8);
+    assert_eq!(mp4_report.samples, 8);
+    assert_eq!(mp4_report.keyframes, 2);
+    assert!(has(&mp4_report.bytes, b"ftyp"));
+    assert!(has(&mp4_report.bytes, b"vvc1"), "missing vvc1 sample entry");
+    assert!(has(&mp4_report.bytes, b"vvcC"), "missing vvcC config box");
+    assert!(has(&mp4_report.bytes, b"mdat"));
+    assert!(has(&mp4_report.bytes, b"moov"));
+
+    let mkv_opts = VideoOptions {
+        encoder: VideoEncoder::H266Software,
+        container: VideoContainer::Mkv,
+        frames: 6,
+        fps_num: 24,
+        fps_den: 1,
+        quantizer: 80,
+        speed: 9,
+        keyframe_interval: 6,
+        ..Default::default()
+    };
+    let mkv_report = kine_server::render_video(&mut engine, handle, &mkv_opts).expect("h266 mkv");
+    assert_eq!(&mkv_report.bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
+    assert!(has(&mkv_report.bytes, b"V_MPEGH/ISO/VVC"));
 }

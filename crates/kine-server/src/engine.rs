@@ -30,6 +30,10 @@ pub struct DoctorReport {
     pub hw_encode_available: bool,
     /// Whether the software AV1 encoder is available (it always is).
     pub sw_encode_available: bool,
+    /// Whether the software H.266 / VVC encoder is available (it always is).
+    pub h266_encode_available: bool,
+    /// Whether `rav1e` NASM/GAS assembly acceleration (`--features asm`) is enabled.
+    pub rav1e_asm_enabled: bool,
 }
 
 /// One static finding from `inspect`, produced without rasterizing.
@@ -742,6 +746,8 @@ impl Engine {
             host,
             hw_encode_available: self.hw_encode_available(),
             sw_encode_available: true,
+            h266_encode_available: true,
+            rav1e_asm_enabled: cfg!(feature = "asm"),
         }
     }
 

@@ -1,11 +1,14 @@
-//! Software video encoding, decoding, and uncompressed/lossless stream formats, in pure Rust.
+//! Software video encoding (AV1 via `rav1e` and H.266 / VVC), decoding, and
+//! uncompressed/lossless stream formats.
 //!
 //! Colour handling is **BT.709 limited range** for 8-bit SDR, with the matrix
-//! applied explicitly rather than assumed from a library default.
+//! applied explicitly using integer fixed-point arithmetic rather than assumed
+//! from a library default.
 
 pub mod av1;
 pub mod color;
 pub mod raw;
+pub mod vvc;
 pub mod y4m;
 
 pub use av1::{Av1Encoder, EncoderSettings};
@@ -14,6 +17,9 @@ pub use color::{
 };
 pub use raw::{
     decode_kvid, decode_raw_stream, encode_kvid, encode_raw_frame, KvidVideo, RawPixelFormat,
+};
+pub use vvc::{
+    decode_vvc_annexb_to_i420, parse_vvc_annexb_nals, VvcEncoder, VvcNalType, VvcNalUnit,
 };
 pub use y4m::{decode_y4m, Y4mEncoder, Y4mVideo};
 
@@ -40,9 +46,9 @@ pub enum EncodeError {
 /// One coded access unit, ready for the muxer.
 #[derive(Debug, Clone)]
 pub struct AccessUnit {
-    /// Coded bytes: OBU stream for AV1, Annex-B for H.264.
+    /// Coded bytes: OBU stream for AV1, Annex-B for H.266/VVC and H.264.
     pub data: Vec<u8>,
-    /// True when this unit is a sync sample (IDR / AV1 keyframe).
+    /// True when this unit is a sync sample (IDR / CRA / AV1 keyframe).
     pub keyframe: bool,
 }
 

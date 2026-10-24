@@ -1345,17 +1345,26 @@ impl StudioState {
             return Ok(job);
         }
 
-        let Some(container) = VideoContainer::from_extension(&fmt) else {
-            return Err(StudioError::Message(format!(
-                "unsupported export format: {fmt}"
-            )));
+        let (container, encoder) = match fmt.as_str() {
+            "h266" | "vvc" | "mp4-h266" | "mp4-vvc" => {
+                (VideoContainer::Mp4, VideoEncoder::H266Software)
+            }
+            "mkv-h266" | "mkv-vvc" => (VideoContainer::Mkv, VideoEncoder::H266Software),
+            other => {
+                let Some(c) = VideoContainer::from_extension(other) else {
+                    return Err(StudioError::Message(format!(
+                        "unsupported export format: {fmt}"
+                    )));
+                };
+                (c, VideoEncoder::Av1Software)
+            }
         };
         let mut opts = VideoOptions::default();
         opts.frames = u64::from(frames);
         opts.fps_num = fps;
         opts.fps_den = 1;
         opts.container = container;
-        opts.encoder = VideoEncoder::Av1Software;
+        opts.encoder = encoder;
         opts.quantizer = self.settings.export_quantizer as usize;
         opts.speed = self.settings.export_speed;
 

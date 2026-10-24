@@ -7,7 +7,7 @@ use kine_audio::{
     AudioClip, AudioTrackSpec, BiquadFilterSpec, CompressorSpec, FadeCurve,
 };
 use kine_encode::{
-    encode_kvid, encode_raw_frame, Av1Encoder, EncoderSettings, RawPixelFormat, Y4mEncoder,
+    encode_kvid, encode_raw_frame, Av1Encoder, EncoderSettings, RawPixelFormat, VvcEncoder, Y4mEncoder,
 };
 use kine_mux::{AudioSpec, EbmlDocType, MkvMuxer, Muxer};
 use kine_render::{encode_animated_gif, pixmap_to_straight_rgba};
@@ -83,6 +83,8 @@ impl VideoContainer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoEncoder {
     Av1Software,
+    /// Software H.266 / VVC (ITU-T H.266 | ISO/IEC 23090-3) encoder.
+    H266Software,
     #[cfg(feature = "hwencode")]
     H264Hardware,
     #[cfg(feature = "zero-copy")]
@@ -93,6 +95,7 @@ impl VideoEncoder {
     pub fn name(self) -> &'static str {
         match self {
             Self::Av1Software => "av1 (rav1e, software)",
+            Self::H266Software => "h266 / vvc (software)",
             #[cfg(feature = "hwencode")]
             Self::H264Hardware => "h264 (hardware, NV12 upload)",
             #[cfg(feature = "zero-copy")]
@@ -102,7 +105,7 @@ impl VideoEncoder {
 
     pub fn is_available(self) -> bool {
         match self {
-            Self::Av1Software => true,
+            Self::Av1Software | Self::H266Software => true,
             #[cfg(feature = "hwencode")]
             Self::H264Hardware => {
                 matches!(kine_mux::hwencode::h264_encoder_available(), Ok(true))
@@ -479,16 +482,27 @@ pub fn render_video(
         return render_video_zero_copy(engine, handle, opts, width, height);
     }
 
+    if opts.encoder == VideoEncoder::H266Software && opts.container == VideoContainer::Webm {
+        return Err(EngineError::Video(
+            "WebM container only supports AV1/VP9 video; use .mp4 or .mkv for H.266/VVC".into(),
+        ));
+    }
+
     let mut settings = EncoderSettings::new(width, height, opts.fps_num, opts.fps_den);
     settings.quantizer = opts.quantizer;
     settings.speed = opts.speed;
     settings.keyframe_interval = opts.keyframe_interval;
-    let mut encoder = Av1Encoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
+
+    let mux_codec = if opts.encoder == VideoEncoder::H266Software {
+        kine_mux::Codec::H266
+    } else {
+        kine_mux::Codec::Av1
+    };
 
     let audio = prepare_audio(engine, handle, opts.duration_seconds())?;
     let mut sink = ContainerSink::new(
         opts.container,
-        kine_mux::Codec::Av1,
+        mux_codec,
         width,
         height,
         opts.fps_num,
@@ -501,38 +515,72 @@ pub fn render_video(
     let mut distinct = 0u64;
     let mut previous: Option<Vec<u8>> = None;
 
-    for frame in 0..opts.frames {
-        let time = opts.frame_time(frame);
-        let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
-        let rgba = pixmap.data_as_u8_slice();
+    if opts.encoder == VideoEncoder::H266Software {
+        let mut encoder = VvcEncoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
+        for frame in 0..opts.frames {
+            let time = opts.frame_time(frame);
+            let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
+            let rgba = pixmap.data_as_u8_slice();
 
-        let changed = previous.as_deref() != Some(rgba);
-        if changed {
-            distinct += 1;
-            previous = Some(rgba.to_vec());
+            if previous.as_deref() != Some(rgba) {
+                distinct += 1;
+                previous = Some(rgba.to_vec());
+            }
+
+            let out = encoder
+                .encode_rgba(rgba)
+                .map_err(|e| EngineError::Video(e.to_string()))?;
+            for unit in out.units {
+                if unit.keyframe {
+                    keyframes += 1;
+                }
+                sink.push_video(samples, &unit.data, unit.keyframe)?;
+                samples += 1;
+            }
         }
-
-        let out = encoder
-            .encode_rgba(rgba)
+        let tail = encoder
+            .finish()
             .map_err(|e| EngineError::Video(e.to_string()))?;
-        for unit in out.units {
+        for unit in tail.units {
             if unit.keyframe {
                 keyframes += 1;
             }
             sink.push_video(samples, &unit.data, unit.keyframe)?;
             samples += 1;
         }
-    }
+    } else {
+        let mut encoder = Av1Encoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
+        for frame in 0..opts.frames {
+            let time = opts.frame_time(frame);
+            let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
+            let rgba = pixmap.data_as_u8_slice();
 
-    let tail = encoder
-        .finish()
-        .map_err(|e| EngineError::Video(e.to_string()))?;
-    for unit in tail.units {
-        if unit.keyframe {
-            keyframes += 1;
+            if previous.as_deref() != Some(rgba) {
+                distinct += 1;
+                previous = Some(rgba.to_vec());
+            }
+
+            let out = encoder
+                .encode_rgba(rgba)
+                .map_err(|e| EngineError::Video(e.to_string()))?;
+            for unit in out.units {
+                if unit.keyframe {
+                    keyframes += 1;
+                }
+                sink.push_video(samples, &unit.data, unit.keyframe)?;
+                samples += 1;
+            }
         }
-        sink.push_video(samples, &unit.data, unit.keyframe)?;
-        samples += 1;
+        let tail = encoder
+            .finish()
+            .map_err(|e| EngineError::Video(e.to_string()))?;
+        for unit in tail.units {
+            if unit.keyframe {
+                keyframes += 1;
+            }
+            sink.push_video(samples, &unit.data, unit.keyframe)?;
+            samples += 1;
+        }
     }
 
     if samples == 0 {
@@ -543,7 +591,11 @@ pub fn render_video(
 
     Ok(VideoReport {
         bytes,
-        encoder: VideoEncoder::Av1Software,
+        encoder: if opts.encoder == VideoEncoder::H266Software {
+            VideoEncoder::H266Software
+        } else {
+            VideoEncoder::Av1Software
+        },
         container: opts.container,
         audio_frames,
         audio_samples: audio

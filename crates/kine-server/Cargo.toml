@@ -36,3 +36,5 @@ hwencode = ["kine-mux/hwencode"]
 # The closed loop: one wgpu device shared by the rasterizer and the encoder, so a
 # rendered texture reaches the encoder without touching host memory.
 zero-copy = ["gpu", "hwencode"]
+# Optional NASM assembly acceleration for rav1e software AV1 encoding.
+asm = ["kine-encode/asm"]
