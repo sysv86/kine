@@ -12,7 +12,6 @@ members = [
     "crates/kine-platform",
     "crates/kine-server",
     "crates/kine-cli",
-    "crates/kine-android",
 ]
 
 [workspace.package]
