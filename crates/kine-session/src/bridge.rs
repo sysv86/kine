@@ -2,8 +2,7 @@
 //!
 //! Replaces the legacy in-app AI chat panel with a zero-overhead, bidirectional
 //! TCP bridge (`127.0.0.1:7701` default) and automatic disk hot-reload watcher.
-//! External CLI agents (Claude Code / Opus 5.5, Codex / GPT-6 Astra, Gemini CLI /
-//! Argon 4, OpenCode) run in their own terminal/window and control Kine Studio
+//! External CLI agents run in their own terminal/window and control Kine Studio
 //! in real time via `kine agent <subcommand>` or direct file edits.
 
 use crate::agent_tools::{agent_tools_json_schema, dispatch_agent_tool, AgentToolResult};
@@ -221,6 +220,7 @@ impl StudioBridgeServer {
 impl Drop for StudioBridgeServer {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
+        let _ = TcpStream::connect(&self.addr);
         for p in &self.manifest_paths {
             let _ = fs::remove_file(p);
         }
@@ -742,6 +742,14 @@ pub fn bridge_call(addr: &str, tool: &str, args: Value) -> Result<AgentToolResul
     let v: Value =
         serde_json::from_str(resp_line.trim()).map_err(|e| format!("bridge JSON error: {e}"))?;
 
+    if let Some(err_obj) = v.get("error") {
+        let code = err_obj.get("code").and_then(Value::as_i64).unwrap_or(-32000);
+        let msg = err_obj
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("JSON-RPC bridge error");
+        return Err(format!("bridge RPC error ({code}): {msg}"));
+    }
     if let Some(res_obj) = v.get("result") {
         if let Ok(tool_res) = serde_json::from_value::<AgentToolResult>(res_obj.clone()) {
             return Ok(tool_res);
@@ -783,4 +791,225 @@ pub fn bridge_watch(addr: &str, mut on_event: impl FnMut(Value) -> bool) -> Resu
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kine_render::RenderBackend;
+    use std::sync::mpsc;
+    use std::thread;
+
+    fn temp_workspace(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "kine_bridge_test_{}_{}",
+            tag,
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp workspace");
+        dir
+    }
+
+    #[test]
+    fn bridge_server_manifest_discovery_and_cleanup() {
+        let ws = temp_workspace("manifest");
+        let server =
+            StudioBridgeServer::start(Some("127.0.0.1:0"), Some(&ws), None).expect("bind bridge");
+        let bound_addr = server.addr().to_string();
+        assert!(bound_addr.starts_with("127.0.0.1:"));
+
+        let manifest_file = ws.join(BRIDGE_MANIFEST_FILENAME);
+        assert!(manifest_file.exists(), "manifest must be written on start");
+
+        let discovered = discover_bridge_addr(Some(&ws));
+        assert_eq!(discovered, bound_addr);
+
+        drop(server);
+        assert!(
+            !manifest_file.exists(),
+            "manifest must be removed when StudioBridgeServer drops"
+        );
+        let _ = fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn bridge_wire_ping_schema_and_parse_error() {
+        let ws = temp_workspace("wire");
+        let server =
+            StudioBridgeServer::start(Some("127.0.0.1:0"), Some(&ws), None).expect("bind bridge");
+        let addr = server.addr().to_string();
+
+        // 1. JSON-RPC ping
+        let mut stream = TcpStream::connect(&addr).expect("connect to bridge");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        writeln!(
+            stream,
+            r#"{{"jsonrpc":"2.0","id":7,"method":"ping","params":{{}}}}"#
+        )
+        .unwrap();
+        stream.flush().unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let v: Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(v["id"], 7);
+        assert_eq!(v["result"], "pong");
+        assert_eq!(v["ok"], true);
+
+        // 2. JSON-RPC schema
+        line.clear();
+        writeln!(
+            stream,
+            r#"{{"jsonrpc":"2.0","id":8,"method":"schema","params":{{}}}}"#
+        )
+        .unwrap();
+        stream.flush().unwrap();
+        reader.read_line(&mut line).unwrap();
+        let schema_resp: Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(schema_resp["id"], 8);
+        assert!(schema_resp["result"].as_array().unwrap().len() >= 25);
+
+        // 3. Malformed JSON -> -32700 parse error
+        line.clear();
+        writeln!(stream, "{{not valid json").unwrap();
+        stream.flush().unwrap();
+        reader.read_line(&mut line).unwrap();
+        let err_resp: Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(err_resp["ok"], false);
+        assert_eq!(err_resp["error"]["code"], -32700);
+
+        drop(server);
+        let _ = fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn bridge_call_and_watch_roundtrip_against_studio_state() {
+        let ws = temp_workspace("roundtrip");
+        let mut state = StudioState::new(Some(ws.clone()));
+        state.engine.set_backend(RenderBackend::Cpu);
+        let _ = state.render_current_frame();
+
+        let addr = state
+            .start_bridge_server(Some("127.0.0.1:0"))
+            .expect("start bridge server");
+        let pending_flag = state.bridge.as_ref().unwrap().pending_flag();
+
+        // Subscribe a watcher client before mutating state
+        let addr_watch = addr.clone();
+        let (ev_tx, ev_rx) = mpsc::channel::<Value>();
+        let watcher_handle = thread::spawn(move || {
+            let _ = bridge_watch(&addr_watch, |ev| {
+                let kind = ev.get("event").and_then(Value::as_str).unwrap_or("");
+                let _ = ev_tx.send(ev.clone());
+                kind != "playhead_changed"
+            });
+        });
+
+        // Wait for initial "subscribed" ack event
+        let sub_ack = ev_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("receive subscribed ack");
+        assert_eq!(sub_ack["event"], "subscribed");
+
+        // Spawn a client thread executing studio_status, studio_add_node, and studio_seek
+        let addr_client = addr.clone();
+        let client_handle = thread::spawn(move || {
+            let status =
+                bridge_call(&addr_client, "studio_status", json!({})).expect("status call");
+            assert!(status.ok);
+            assert_eq!(status.tool, "studio_status");
+
+            let add = bridge_call(
+                &addr_client,
+                "studio_add_node",
+                json!({
+                    "kind": "rect",
+                    "x": 40.0,
+                    "y": 50.0,
+                    "width": 200.0,
+                    "height": 100.0,
+                    "fill": "#33aaee"
+                }),
+            )
+            .expect("add_node call");
+            assert!(add.ok);
+            assert_eq!(add.tool, "studio_add_node");
+
+            let seek = bridge_call(&addr_client, "studio_seek", json!({ "time": 1.25 }))
+                .expect("seek call");
+            assert!(seek.ok);
+            assert_eq!(seek.tool, "studio_seek");
+        });
+
+        // Pump StudioState bridge queue until client thread finishes
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if pending_flag.load(Ordering::Acquire) {
+                state.poll_bridge_and_watcher();
+            }
+            if client_handle.is_finished() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        state.poll_bridge_and_watcher();
+        client_handle.join().expect("client thread succeeded");
+
+        assert!(
+            (state.current_time - 1.25).abs() < 1e-6,
+            "playhead must be updated to 1.25s"
+        );
+        assert_eq!(
+            state.bridge.as_ref().unwrap().commands_handled,
+            3,
+            "bridge server must record 3 handled commands"
+        );
+
+        // Verify broadcast events received by bridge_watch subscriber
+        let ev1 = ev_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("event 1 (tool_executed)");
+        assert_eq!(ev1["event"], "tool_executed");
+        let ev2 = ev_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("event 2 (scene_mutated)");
+        assert_eq!(ev2["event"], "scene_mutated");
+        let ev3 = ev_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("event 3 (playhead_changed)");
+        assert_eq!(ev3["event"], "playhead_changed");
+
+        watcher_handle.join().expect("watcher thread exited cleanly");
+        state.stop_bridge_server();
+        let _ = fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn scene_file_watcher_detects_external_disk_edits() {
+        let ws = temp_workspace("watcher");
+        let scene_path = ws.join("scene.json");
+
+        let mut state = StudioState::new(Some(ws.clone()));
+        state.engine.set_backend(RenderBackend::Cpu);
+        state
+            .save_scene_def_to_disk(Some(&scene_path))
+            .expect("save initial scene");
+        assert!(state.file_watcher.check_changed(Some(&ws), true).is_none());
+
+        // Modify the scene on disk externally (change canvas size to 1920x1080)
+        let mut modified = state.scene_def.clone();
+        modified.width = 1920;
+        modified.height = 1080;
+        fs::write(&scene_path, serde_json::to_string_pretty(&modified).unwrap()).unwrap();
+
+        let changed = state.file_watcher.check_changed(Some(&ws), true);
+        assert_eq!(changed.as_deref(), Some(scene_path.as_path()));
+        state
+            .reload_watched_scene_from_disk(false)
+            .expect("reload modified scene");
+        assert_eq!(state.scene_def.width, 1920);
+        assert_eq!(state.scene_def.height, 1080);
+
+        let _ = fs::remove_dir_all(&ws);
+    }
 }

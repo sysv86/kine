@@ -889,6 +889,12 @@ fn write_audio_file(
     }
 }
 
+fn try_read_file(path: &str) -> Result<String, String> {
+    std::fs::read(path)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .map_err(|e| format!("read {path}: {e}"))
+}
+
 fn read_file(path: &str) -> String {
     String::from_utf8_lossy(&read_file_bytes(path)).into_owned()
 }
@@ -1330,7 +1336,15 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
             if let Some(preset) = flag("--preset") {
                 map.insert("preset".to_string(), serde_json::json!(preset));
             } else if let Some(file) = flag("--file") {
-                map.insert("shader".to_string(), serde_json::json!(read_file(&file)));
+                match try_read_file(&file) {
+                    Ok(code) => {
+                        map.insert("shader".to_string(), serde_json::json!(code));
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
             } else if let Some(inline) = flag("--inline").or_else(|| flag("--shader")) {
                 map.insert("shader".to_string(), serde_json::json!(inline));
             }
@@ -1455,7 +1469,13 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
         "reload" => "studio_reload".to_string(),
         "apply" => {
             let source = match (flag("--file"), flag("--inline")) {
-                (Some(path), _) => read_file(&path),
+                (Some(path), _) => match try_read_file(&path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::FAILURE;
+                    }
+                },
                 (None, Some(code)) => code,
                 _ => {
                     eprintln!("agent apply requires --file <scene.ts|json> or --inline <source>");
@@ -1499,7 +1519,13 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
         }
         "batch" => {
             let raw = match (flag("--file"), flag("--inline")) {
-                (Some(path), _) => read_file(&path),
+                (Some(path), _) => match try_read_file(&path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::FAILURE;
+                    }
+                },
                 (None, Some(inline)) => inline,
                 _ => {
                     eprintln!("agent batch requires --file <calls.json> or --inline <json>");
@@ -1601,5 +1627,584 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
             eprintln!("{e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    fn args(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// Spawns a single-request mock TCP socket server that captures the JSON-RPC
+    /// request sent by `run_agent_cli` and replies with `response_json`.
+    fn spawn_mock_bridge_once(response_json: Value) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock TCP listener");
+        let addr = listener.local_addr().unwrap().to_string();
+        let (tx, rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() {
+                    if let Ok(req) = serde_json::from_str::<Value>(line.trim()) {
+                        let _ = tx.send(req);
+                    }
+                }
+                let _ = writeln!(stream, "{response_json}");
+                let _ = stream.flush();
+            }
+        });
+        (addr, rx, handle)
+    }
+
+    fn ok_bridge_reply(tool: &str, payload: Value) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "ok": true,
+            "result": {
+                "ok": true,
+                "stage": "verified",
+                "tool": tool,
+                "summary": format!("mock executed {tool}"),
+                "frameRevision": 1,
+                "currentTime": 0.0,
+                "frame": 0,
+                "selectedNode": 1,
+                "undoDepth": 0,
+                "redoDepth": 0,
+                "payload": payload
+            }
+        })
+    }
+
+    /// Execute `run_agent_cli` against a mocked TCP socket and return `(ExitCode, captured_request)`.
+    fn run_with_mock_tcp(cli_tokens: &[&str], expected_tool: &str, payload: Value) -> (ExitCode, Value) {
+        let (addr, rx, handle) = spawn_mock_bridge_once(ok_bridge_reply(expected_tool, payload));
+        let mut full_args = args(cli_tokens);
+        full_args.push("--addr".to_string());
+        full_args.push(addr);
+        let code = run_agent_cli(&full_args, RenderBackend::Cpu);
+        let req = rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("mock TCP socket must receive JSON-RPC request");
+        handle.join().expect("mock server thread join");
+        assert_eq!(req["jsonrpc"], "2.0");
+        assert_eq!(req["method"], expected_tool);
+        (code, req)
+    }
+
+    #[test]
+    fn agent_cli_status_and_selection_over_mock_tcp() {
+        let (code, req) = run_with_mock_tcp(&["status"], "studio_status", json!({ "fps": 30.0 }));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(req["params"].is_object());
+
+        let (code, req) = run_with_mock_tcp(
+            &["selection", "--prompt", "scale hero title by 1.2x"],
+            "studio_selection",
+            json!({ "agentContextPrompt": "KINE STUDIO SELECTION CONTEXT" }),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["request"], "scale hero title by 1.2x");
+    }
+
+    #[test]
+    fn agent_cli_inspection_and_selection_commands_over_mock_tcp() {
+        let (code, req) = run_with_mock_tcp(&["look", "--out", "/tmp/frame.png"], "studio_look", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["outPath"], "/tmp/frame.png");
+
+        let (code, _) = run_with_mock_tcp(&["tree"], "studio_tree", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+
+        let (code, _) = run_with_mock_tcp(&["timeline"], "studio_timeline", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+
+        let (code, req) = run_with_mock_tcp(&["inspect", "--node", "#2"], "studio_inspect", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["nodeId"], 2);
+
+        let (code, req) = run_with_mock_tcp(&["select", "--node", "5"], "studio_select", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["nodeId"], 5);
+
+        let (code, req) = run_with_mock_tcp(&["select", "--clear"], "studio_select", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["clear"], true);
+    }
+
+    #[test]
+    fn agent_cli_transport_and_canvas_commands_over_mock_tcp() {
+        let (code, req) = run_with_mock_tcp(&["seek", "--time", "2.5"], "studio_seek", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["time"], 2.5);
+
+        let (code, req) = run_with_mock_tcp(&["frame", "--frame", "45"], "studio_frame", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["frame"], 45);
+
+        for action in ["play", "pause", "toggle", "stop"] {
+            let (code, req) = run_with_mock_tcp(&[action], "studio_transport", json!({}));
+            assert_eq!(code, ExitCode::SUCCESS);
+            assert_eq!(req["params"]["action"], action);
+        }
+
+        let (code, req) = run_with_mock_tcp(&["step", "--delta", "-3"], "studio_transport", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["action"], "step");
+        assert_eq!(req["params"]["deltaFrames"], -3);
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "transport",
+                "--action",
+                "play",
+                "--fps",
+                "60",
+                "--rate",
+                "1.5",
+                "--loop",
+                "true",
+                "--muted",
+                "false",
+                "--volume",
+                "0.75",
+                "--snap",
+                "true",
+                "--ripple",
+                "false",
+            ],
+            "studio_transport",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["fps"], 60.0);
+        assert_eq!(req["params"]["rate"], 1.5);
+        assert_eq!(req["params"]["loop"], true);
+        assert_eq!(req["params"]["muted"], false);
+        assert_eq!(req["params"]["volume"], 0.75);
+        assert_eq!(req["params"]["snap"], true);
+        assert_eq!(req["params"]["ripple"], false);
+
+        let (code, req) = run_with_mock_tcp(
+            &["resize", "--width", "1920", "--height", "1080"],
+            "studio_resize_canvas",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["width"], 1920);
+        assert_eq!(req["params"]["height"], 1080);
+    }
+
+    #[test]
+    fn agent_cli_scene_graph_and_style_mutations_over_mock_tcp() {
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "add",
+                "--kind",
+                "rect",
+                "--parent",
+                "0",
+                "--x",
+                "120",
+                "--y",
+                "80",
+                "--width",
+                "400",
+                "--height",
+                "220",
+                "--fill",
+                "#ff3366",
+                "--corner-radius",
+                "16",
+                "--opacity",
+                "0.85",
+                "--undo-label",
+                "Add card",
+            ],
+            "studio_add_node",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["kind"], "rect");
+        assert_eq!(req["params"]["parentId"], 0);
+        assert_eq!(req["params"]["x"], 120.0);
+        assert_eq!(req["params"]["y"], 80.0);
+        assert_eq!(req["params"]["width"], 400.0);
+        assert_eq!(req["params"]["height"], 220.0);
+        assert_eq!(req["params"]["fill"], "#ff3366");
+        assert_eq!(req["params"]["cornerRadius"], 16.0);
+        assert_eq!(req["params"]["opacity"], 0.85);
+        assert_eq!(req["params"]["undoLabel"], "Add card");
+
+        let (code, req) = run_with_mock_tcp(&["delete", "--node", "3"], "studio_delete_node", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["nodeId"], 3);
+
+        let (code, req) = run_with_mock_tcp(&["duplicate", "--node", "3"], "studio_duplicate_node", json!({}));
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["nodeId"], 3);
+
+        let (code, req) = run_with_mock_tcp(
+            &["reorder", "--node", "3", "--delta", "-1"],
+            "studio_reorder_node",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["nodeId"], 3);
+        assert_eq!(req["params"]["delta"], -1);
+
+        let (code, req) = run_with_mock_tcp(
+            &["visibility", "--node", "3", "--visible", "false"],
+            "studio_toggle_visibility",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["visible"], false);
+
+        let (code, req) = run_with_mock_tcp(
+            &["align", "--node", "3", "--h", "center", "--v", "middle"],
+            "studio_align_node",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["horizontal"], "center");
+        assert_eq!(req["params"]["vertical"], "middle");
+
+        let (code, req) = run_with_mock_tcp(
+            &["set-text", "--node", "2", "--text", "Updated Headline"],
+            "studio_set_text",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["nodeId"], 2);
+        assert_eq!(req["params"]["text"], "Updated Headline");
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "set-style",
+                "--node",
+                "2",
+                "--fill",
+                "#112233",
+                "--opacity",
+                "0.7",
+                "--stroke-color",
+                "#ffffff",
+                "--stroke-width",
+                "2.5",
+                "--blend",
+                "screen",
+            ],
+            "studio_set_style",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["changes"]["fill"], "#112233");
+        assert_eq!(req["params"]["changes"]["opacity"], 0.7);
+        assert_eq!(req["params"]["changes"]["strokeColor"], "#ffffff");
+        assert_eq!(req["params"]["changes"]["strokeWidth"], 2.5);
+        assert_eq!(req["params"]["changes"]["blend"], "screen");
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "transform",
+                "--node",
+                "2",
+                "--x",
+                "50",
+                "--y",
+                "60",
+                "--scale",
+                "1.25",
+                "--rotation",
+                "15",
+            ],
+            "studio_transform",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["x"], 50.0);
+        assert_eq!(req["params"]["y"], 60.0);
+        assert_eq!(req["params"]["scale"], 1.25);
+        assert_eq!(req["params"]["rotation"], 15.0);
+    }
+
+    #[test]
+    fn agent_cli_shader_audio_animation_and_batch_over_mock_tcp() {
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "shader",
+                "--node",
+                "1",
+                "--preset",
+                "crt-scanlines",
+                "--blend",
+                "overlay",
+                "--uniforms",
+                r#"{"intensity":0.6}"#,
+            ],
+            "studio_set_shader",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["preset"], "crt-scanlines");
+        assert_eq!(req["params"]["blend"], "overlay");
+        assert_eq!(req["params"]["uniforms"]["intensity"], 0.6);
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "audio",
+                "--action",
+                "add",
+                "--src",
+                "synth:sine:440",
+                "--gain-db",
+                "-6",
+                "--pan",
+                "-0.25",
+            ],
+            "studio_audio",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["action"], "add");
+        assert_eq!(req["params"]["src"], "synth:sine:440");
+        assert_eq!(req["params"]["gainDb"], -6.0);
+        assert_eq!(req["params"]["pan"], -0.25);
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "animate",
+                "--node",
+                "2",
+                "--prop",
+                "opacity",
+                "--from",
+                "0",
+                "--to",
+                "1",
+                "--start",
+                "0.1",
+                "--end",
+                "0.9",
+                "--easing",
+                "spring",
+            ],
+            "studio_add_animation",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["property"], "opacity");
+        assert_eq!(req["params"]["from"], 0.0);
+        assert_eq!(req["params"]["to"], 1.0);
+        assert_eq!(req["params"]["easing"], "spring");
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "keyframe",
+                "--node",
+                "2",
+                "--prop",
+                "translateX",
+                "--time",
+                "0.5",
+                "--value",
+                "240",
+                "--easing",
+                "easeOut",
+            ],
+            "studio_add_keyframe",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["property"], "translateX");
+        assert_eq!(req["params"]["time"], 0.5);
+        assert_eq!(req["params"]["value"], 240.0);
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "delete-keyframe",
+                "--node",
+                "2",
+                "--prop",
+                "translateX",
+                "--time",
+                "0.5",
+            ],
+            "studio_delete_keyframe",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["time"], 0.5);
+
+        let (code, req) = run_with_mock_tcp(
+            &["delete-anim", "--node", "2", "--prop", "translateX"],
+            "studio_delete_animation",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["property"], "translateX");
+
+        let (code, req) = run_with_mock_tcp(
+            &["shift", "--node", "2", "--delta", "0.5", "--ripple", "true"],
+            "studio_shift_time",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["delta"], 0.5);
+        assert_eq!(req["params"]["ripple"], true);
+
+        let (code, req) = run_with_mock_tcp(
+            &["split", "--node", "2", "--time", "1.2"],
+            "studio_split",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["time"], 1.2);
+
+        for (sub, tool) in [
+            ("undo", "studio_undo"),
+            ("redo", "studio_redo"),
+            ("history", "studio_history"),
+            ("reload", "studio_reload"),
+        ] {
+            let (code, _) = run_with_mock_tcp(&[sub], tool, json!({}));
+            assert_eq!(code, ExitCode::SUCCESS);
+        }
+
+        let (code, req) = run_with_mock_tcp(
+            &["load", "--scene", "demos/intro.ts"],
+            "studio_load_scene",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["path"], "demos/intro.ts");
+
+        let (code, req) = run_with_mock_tcp(
+            &["apply", "--inline", r#"{"width":1280,"height":720,"root":{"kind":"container"}}"#],
+            "studio_apply_source",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(req["params"]["source"].as_str().unwrap().contains("1280"));
+
+        let (code, req) = run_with_mock_tcp(
+            &["save", "--out", "saved_scene.json"],
+            "studio_save_scene",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["path"], "saved_scene.json");
+
+        let (code, req) = run_with_mock_tcp(
+            &["export", "--format", "mp4", "--out", "out.mp4"],
+            "studio_export",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["format"], "mp4");
+        assert_eq!(req["params"]["out"], "out.mp4");
+
+        let (code, req) = run_with_mock_tcp(
+            &["call", "--tool", "studio_status", "--args", r#"{"verbose":true}"#],
+            "studio_status",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["verbose"], true);
+
+        let (code, req) = run_with_mock_tcp(
+            &[
+                "batch",
+                "--inline",
+                r#"[{"tool":"studio_play"},{"tool":"studio_seek","args":{"time":1.0}}]"#,
+            ],
+            "studio_batch",
+            json!({}),
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(req["params"]["calls"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn agent_cli_watch_and_error_handling_over_mock_tcp() {
+        // 1. Test `kine agent watch` streaming events over mocked TCP socket
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let handle = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let req: Value = serde_json::from_str(line.trim()).unwrap();
+                assert_eq!(req["method"], "subscribe");
+                writeln!(
+                    stream,
+                    r#"{{"event":"subscribed","ok":true,"summary":"ack"}}"#
+                )
+                .unwrap();
+                writeln!(
+                    stream,
+                    r#"{{"event":"scene_mutated","frameRevision":2,"currentTime":0.5,"frame":15,"selectedNode":1,"summary":"mutated","payload":{{}}}}"#
+                )
+                .unwrap();
+                stream.flush().unwrap();
+            }
+        });
+        let code = run_agent_cli(&args(&["watch", "--addr", &addr]), RenderBackend::Cpu);
+        assert_eq!(code, ExitCode::SUCCESS);
+        handle.join().unwrap();
+
+        // 2. Refused tool response returns ExitCode::FAILURE
+        let refused_reply = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "ok": false,
+            "result": {
+                "ok": false,
+                "stage": "refused",
+                "tool": "studio_delete_node",
+                "summary": "cannot delete root node",
+                "frameRevision": 1,
+                "currentTime": 0.0,
+                "frame": 0,
+                "selectedNode": 0,
+                "undoDepth": 0,
+                "redoDepth": 0,
+                "payload": {}
+            }
+        });
+        let (addr2, _rx2, handle2) = spawn_mock_bridge_once(refused_reply);
+        let code2 = run_agent_cli(
+            &args(&["delete", "--node", "0", "--addr", &addr2]),
+            RenderBackend::Cpu,
+        );
+        assert_eq!(code2, ExitCode::FAILURE);
+        handle2.join().unwrap();
+
+        // 3. Unknown subcommand and missing file return ExitCode::FAILURE without panicking or exiting process
+        assert_eq!(
+            run_agent_cli(&args(&["nonexistent-subcommand"]), RenderBackend::Cpu),
+            ExitCode::FAILURE
+        );
+        assert_eq!(
+            run_agent_cli(
+                &args(&["apply", "--file", "/nonexistent/path/scene.ts"]),
+                RenderBackend::Cpu
+            ),
+            ExitCode::FAILURE
+        );
     }
 }
