@@ -8,11 +8,10 @@
 use crate::state::{node_at_path_mut, StudioError, StudioState};
 use kine_core::{NodeId, NodeKind};
 use kine_script::{AnimationDef, KeyframeDef, NodeDef};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Classification of a track row in the bottom NLE timeline.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimelineTrackKind {
     SceneNode {
         node_id: NodeId,
@@ -30,7 +29,7 @@ pub enum TimelineTrackKind {
 }
 
 /// A diamond keyframe marker along an animation track lane.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TimelineKeyframeMarker {
     pub node_id: NodeId,
     pub property: String,
@@ -39,7 +38,7 @@ pub struct TimelineKeyframeMarker {
 }
 
 /// One horizontal lane in the bottom NLE timeline & node editor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TimelineTrack {
     pub kind: TimelineTrackKind,
     pub label: String,
@@ -52,7 +51,7 @@ pub struct TimelineTrack {
 }
 
 /// A major or minor tick on the timeline time ruler.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TimelineTick {
     pub time_sec: f64,
     pub x_px: f32,
@@ -110,7 +109,8 @@ impl StudioState {
             let depth = path.len();
             let badge = node_def_badge(def);
             let label = node_def_display_label(node_id, def);
-            let (start_sec, end_sec, all_kfs) = node_time_span_and_keyframes(node_id, def, comp_dur);
+            let (start_sec, end_sec, all_kfs) =
+                node_time_span_and_keyframes(node_id, def, comp_dur);
             let hidden = def.opacity.is_some_and(|o| o <= 0.001);
             let selected = self.selected_node == Some(node_id);
 
@@ -140,10 +140,7 @@ impl StudioState {
             if let Some(anim_map) = &def.animate {
                 for (prop, spec) in anim_map {
                     let (p_start, p_end, kfs) = animation_spec_markers(node_id, prop, spec);
-                    let easing = spec
-                        .easing
-                        .clone()
-                        .unwrap_or_else(|| "linear".to_string());
+                    let easing = spec.easing.clone().unwrap_or_else(|| "linear".to_string());
                     tracks.push(TimelineTrack {
                         kind: TimelineTrackKind::AnimationProperty {
                             node_id,
@@ -245,23 +242,25 @@ impl StudioState {
             format!("Add keyframe on {node_id}.{prop} @ {t:.2}s"),
             move |def| {
                 let anim_map = def.animate.get_or_insert_with(BTreeMap::new);
-                let entry = anim_map.entry(prop.clone()).or_insert_with(|| AnimationDef {
-                    from: eval_val,
-                    to: eval_val,
-                    start: 0.0,
-                    end: (t + 1.0).max(1.0),
-                    keyframes: Some(vec![
-                        KeyframeDef {
-                            time: 0.0,
-                            value: eval_val,
-                        },
-                        KeyframeDef {
-                            time: (t + 1.0).max(1.0),
-                            value: eval_val,
-                        },
-                    ]),
-                    easing: Some(easing.clone()),
-                });
+                let entry = anim_map
+                    .entry(prop.clone())
+                    .or_insert_with(|| AnimationDef {
+                        from: eval_val,
+                        to: eval_val,
+                        start: 0.0,
+                        end: (t + 1.0).max(1.0),
+                        keyframes: Some(vec![
+                            KeyframeDef {
+                                time: 0.0,
+                                value: eval_val,
+                            },
+                            KeyframeDef {
+                                time: (t + 1.0).max(1.0),
+                                value: eval_val,
+                            },
+                        ]),
+                        easing: Some(easing.clone()),
+                    });
 
                 let mut kfs = entry.keyframes.take().unwrap_or_else(|| {
                     vec![
@@ -397,9 +396,10 @@ impl StudioState {
             .split_last()
             .ok_or(StudioError::NodeNotFound(node_id))?;
         let parent_path = parent_path.to_vec();
+        let parent_path_for_insert = parent_path.clone();
 
         self.commit_mutation(format!("Duplicate node {node_id}"), move |scene_def| {
-            let parent = node_at_path_mut(&mut scene_def.root, &parent_path)
+            let parent = node_at_path_mut(&mut scene_def.root, &parent_path_for_insert)
                 .ok_or(StudioError::NodeNotFound(node_id))?;
             let children = parent
                 .children
@@ -476,7 +476,9 @@ impl StudioState {
         let Some(node) = self.runtime_node(node_id) else {
             return 0.0;
         };
-        let rect = node.abs_pos.unwrap_or(kine_core::Rect::new(0.0, 0.0, 0.0, 0.0));
+        let rect = node
+            .abs_pos
+            .unwrap_or(kine_core::Rect::new(0.0, 0.0, 0.0, 0.0));
         match prop {
             "offsetX" => rect.x,
             "offsetY" => rect.y,

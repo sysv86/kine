@@ -6,9 +6,9 @@
 
 #[cfg(feature = "xilem-ui")]
 use xilem::{
-    masonry::{layout::AsUnit as _, parley::style::FontWeight},
+    masonry::parley::style::FontWeight,
     style::Style as _,
-    view::{flex_col, flex_row, label, sized_box, text_button, CrossAxisAlignment},
+    view::{flex_row, label, sized_box, text_button, CrossAxisAlignment},
     Color, WidgetView,
 };
 
@@ -157,7 +157,10 @@ where
 
 /// Build a compact semantic badge chip (`TEXT`, `RECT`, `SHDR`, `VID`, `AUD`).
 #[cfg(feature = "xilem-ui")]
-pub fn kind_badge_chip<State>(badge: &str, pal: StudioPalette) -> impl WidgetView<State> + use<State>
+pub fn kind_badge_chip<State>(
+    badge: &str,
+    pal: StudioPalette,
+) -> impl WidgetView<State> + use<State>
 where
     State: 'static,
 {
@@ -196,7 +199,11 @@ where
 {
     let chevron = if is_open { "▾" } else { "▸" };
     let btn_label = format!("{chevron} {title}");
-    let bg = if is_open { pal.bg_raised } else { pal.bg_surface };
+    let bg = if is_open {
+        pal.bg_raised
+    } else {
+        pal.bg_surface
+    };
     flex_row((
         text_button(btn_label, on_toggle),
         label(summary.to_string())
@@ -215,7 +222,10 @@ where
 
 /// Wrap a dock panel inside Hyperframes' signature rounded card with a 3px outer shell gutter.
 #[cfg(feature = "xilem-ui")]
-pub fn dock_card_shell<State, V>(inner: V, pal: StudioPalette) -> impl WidgetView<State> + use<State, V>
+pub fn dock_card_shell<State, V>(
+    inner: V,
+    pal: StudioPalette,
+) -> impl WidgetView<State> + use<State, V>
 where
     State: 'static,
     V: WidgetView<State>,
@@ -245,5 +255,8 @@ pub fn sample_audio_meter_levels(
     }
     let env_l = (0.65 + 0.30 * (current_time * 9.5).sin() as f32).clamp(0.05, 1.0);
     let env_r = (0.62 + 0.32 * (current_time * 11.3 + 0.8).cos() as f32).clamp(0.05, 1.0);
-    ((env_l * volume).clamp(0.0, 1.0), (env_r * volume).clamp(0.0, 1.0))
+    (
+        (env_l * volume).clamp(0.0, 1.0),
+        (env_r * volume).clamp(0.0, 1.0),
+    )
 }

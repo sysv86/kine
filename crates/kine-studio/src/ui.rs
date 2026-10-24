@@ -29,15 +29,12 @@ use std::path::Path;
 
 #[cfg(feature = "xilem-ui")]
 use xilem::{
-    masonry::{
-        layout::AsUnit as _,
-        parley::style::FontWeight,
-        peniko::{ImageBrush, ObjectFit},
-    },
+    masonry::{parley::style::FontWeight, peniko::ImageBrush, properties::types::AsUnit as _},
     style::Style as _,
     view::{
-        checkbox, flex_col, flex_row, image, label, portal, progress_bar, prose, sized_box, slider,
-        split, text_button, text_input, Axis, CrossAxisAlignment, FlexExt as _, FlexSpacer,
+        checkbox, flex_col, flex_row, image, label, progress_bar, prose, sized_box, slider, split,
+        text_button, text_input, AnyFlexChild, Axis, CrossAxisAlignment, FlexExt as _, FlexSpacer,
+        ObjectFit,
     },
     winit::error::EventLoopError,
     EventLoop, WidgetView, WindowOptions, Xilem,
@@ -72,7 +69,11 @@ pub fn app_logic(state: &mut StudioState) -> impl WidgetView<StudioState> + use<
     .split_axis(Axis::Horizontal)
     .split_point(0.21);
 
-    flex_col((header, main_body.flex(1.0))).background_color(pal.bg_shell)
+    flex_col(vec![
+        header.into_any_flex(),
+        main_body.flex(1.0).into_any_flex(),
+    ])
+    .background_color(pal.bg_shell)
 }
 
 #[cfg(feature = "xilem-ui")]
@@ -105,30 +106,44 @@ fn header_bar_view(
     };
     let banner = state.status_banner.clone();
 
-    flex_row((
+    flex_row(vec![
         label("✦ KINE // STUDIO")
             .weight(FontWeight::BOLD)
             .text_size(13.0)
-            .color(pal.accent_mint),
-        label("|").text_size(12.0).color(pal.border_strong),
+            .color(pal.accent_mint)
+            .into_any_flex(),
+        label("|")
+            .text_size(12.0)
+            .color(pal.border_strong)
+            .into_any_flex(),
         label(comp_name)
             .weight(FontWeight::SEMI_BOLD)
             .text_size(12.0)
-            .color(pal.text_primary),
-        label(res_label).text_size(11.0).color(pal.text_muted),
+            .color(pal.text_primary)
+            .into_any_flex(),
+        label(res_label)
+            .text_size(11.0)
+            .color(pal.text_muted)
+            .into_any_flex(),
         label(lint_label)
             .weight(FontWeight::SEMI_BOLD)
             .text_size(11.0)
-            .color(lint_color),
-        FlexSpacer::Flex(1.0),
-        label(banner).text_size(11.0).color(pal.text_muted),
-        FlexSpacer::Flex(1.0),
+            .color(lint_color)
+            .into_any_flex(),
+        FlexSpacer::Flex(1.0).into_any_flex(),
+        label(banner)
+            .text_size(11.0)
+            .color(pal.text_muted)
+            .into_any_flex(),
+        FlexSpacer::Flex(1.0).into_any_flex(),
         text_button("📷 Capture PNG", |st: &mut StudioState| {
             let _ = st.capture_current_frame(FrameFormat::Png, Path::new("studio-capture.png"));
-        }),
+        })
+        .into_any_flex(),
         text_button("◇ SVG", |st: &mut StudioState| {
             let _ = st.capture_current_frame(FrameFormat::Svg, Path::new("studio-capture.svg"));
-        }),
+        })
+        .into_any_flex(),
         text_button(
             if state.inspector_visible {
                 "◧ Inspector: ON"
@@ -138,7 +153,8 @@ fn header_bar_view(
             |st: &mut StudioState| {
                 st.inspector_visible = !st.inspector_visible;
             },
-        ),
+        )
+        .into_any_flex(),
         text_button(theme_label, |st: &mut StudioState| {
             st.dark_theme = !st.dark_theme;
             st.status_banner = format!(
@@ -149,15 +165,18 @@ fn header_bar_view(
                     "Paper (Light)"
                 }
             );
-        }),
+        })
+        .into_any_flex(),
         text_button(backend_label, |st: &mut StudioState| {
             st.cycle_render_backend();
-        }),
+        })
+        .into_any_flex(),
         text_button("✦ Ask Agent", |st: &mut StudioState| {
             st.right_tab = RightDockTab::AiAgent;
             st.inspector_visible = true;
             let _ = st.generate_selected_element_prompt("");
-        }),
+        })
+        .into_any_flex(),
         sized_box(text_button("▶ Export", |st: &mut StudioState| {
             st.right_tab = RightDockTab::Renders;
             st.inspector_visible = true;
@@ -165,8 +184,9 @@ fn header_bar_view(
         }))
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
-        .corner_radius(6.0),
-    ))
+        .corner_radius(6.0)
+        .into_any_flex(),
+    ])
     .cross_axis_alignment(CrossAxisAlignment::Center)
     .padding(6.0)
     .background_color(pal.bg_surface)
@@ -179,37 +199,41 @@ fn left_dock_view(
     pal: StudioPalette,
 ) -> impl WidgetView<StudioState> + use<> {
     let cur_tab = state.left_tab;
-    let tab_strip = flex_row((
+    let tab_strip = flex_row(vec![
         dock_tab_pill(
             LeftDockTab::Compositions.label(),
             cur_tab == LeftDockTab::Compositions,
             pal,
             |st: &mut StudioState| st.left_tab = LeftDockTab::Compositions,
-        ),
+        )
+        .into_any_flex(),
         dock_tab_pill(
             LeftDockTab::Assets.label(),
             cur_tab == LeftDockTab::Assets,
             pal,
             |st: &mut StudioState| st.left_tab = LeftDockTab::Assets,
-        ),
+        )
+        .into_any_flex(),
         dock_tab_pill(
             LeftDockTab::Code.label(),
             cur_tab == LeftDockTab::Code,
             pal,
             |st: &mut StudioState| st.left_tab = LeftDockTab::Code,
-        ),
+        )
+        .into_any_flex(),
         dock_tab_pill(
             LeftDockTab::Catalog.label(),
             cur_tab == LeftDockTab::Catalog,
             pal,
             |st: &mut StudioState| st.left_tab = LeftDockTab::Catalog,
-        ),
-    ))
+        )
+        .into_any_flex(),
+    ])
     .padding(6.0)
     .background_color(pal.bg_inset)
     .border(pal.border_hairline, 1.0);
 
-    let mut items: Vec<_> = Vec::new();
+    let mut items: Vec<AnyFlexChild<StudioState>> = Vec::new();
     match state.left_tab {
         LeftDockTab::Compositions => {
             for (idx, comp) in state.compositions.iter().enumerate() {
@@ -222,16 +246,21 @@ fn left_dock_view(
                 };
                 let sub = comp.subtitle.clone();
                 items.push(
-                    flex_col((
-                        flex_row((
-                            kind_badge_chip(badge, pal),
+                    flex_col(vec![
+                        flex_row(vec![
+                            kind_badge_chip(badge, pal).into_any_flex(),
                             text_button(title, move |st: &mut StudioState| {
                                 let _ = st.select_composition(idx);
-                            }),
-                        ))
-                        .cross_axis_alignment(CrossAxisAlignment::Center),
-                        label(sub).text_size(11.0).color(pal.text_muted),
-                    ))
+                            })
+                            .into_any_flex(),
+                        ])
+                        .cross_axis_alignment(CrossAxisAlignment::Center)
+                        .into_any_flex(),
+                        label(sub)
+                            .text_size(11.0)
+                            .color(pal.text_muted)
+                            .into_any_flex(),
+                    ])
                     .padding(8.0)
                     .background_color(if is_active {
                         pal.accent_mint_wash
@@ -246,7 +275,8 @@ fn left_dock_view(
                         },
                         1.0,
                     )
-                    .corner_radius(8.0),
+                    .corner_radius(8.0)
+                    .into_any_flex(),
                 );
             }
         }
@@ -257,49 +287,60 @@ fn left_dock_view(
                 let uri = asset.uri.clone();
                 let details = format!("{} · {}", asset.uri, asset.details);
                 items.push(
-                    flex_col((
-                        flex_row((
-                            kind_badge_chip(badge, pal),
+                    flex_col(vec![
+                        flex_row(vec![
+                            kind_badge_chip(badge, pal).into_any_flex(),
                             text_button(name, move |st: &mut StudioState| {
                                 st.status_banner = format!("Asset URI ready: {uri}");
-                            }),
-                        ))
-                        .cross_axis_alignment(CrossAxisAlignment::Center),
-                        label(details).text_size(11.0).color(pal.text_muted),
-                    ))
+                            })
+                            .into_any_flex(),
+                        ])
+                        .cross_axis_alignment(CrossAxisAlignment::Center)
+                        .into_any_flex(),
+                        label(details)
+                            .text_size(11.0)
+                            .color(pal.text_muted)
+                            .into_any_flex(),
+                    ])
                     .padding(7.0)
                     .background_color(pal.bg_surface)
                     .border(pal.border_hairline, 1.0)
-                    .corner_radius(8.0),
+                    .corner_radius(8.0)
+                    .into_any_flex(),
                 );
             }
         }
         LeftDockTab::Code => {
             let src_buf = state.source_buffer.clone();
             items.push(
-                flex_col((
-                    flex_row((
+                flex_col(vec![
+                    flex_row(vec![
                         label("Scene AST Source (JSON / TypeScript)")
                             .weight(FontWeight::BOLD)
                             .text_size(12.0)
-                            .color(pal.text_primary),
-                        FlexSpacer::Flex(1.0),
+                            .color(pal.text_primary)
+                            .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
                         text_button("▶ Apply to Engine", |st: &mut StudioState| {
                             if let Err(e) = st.apply_source_buffer() {
                                 st.status_banner = e.to_string();
                             }
-                        }),
-                    ))
-                    .cross_axis_alignment(CrossAxisAlignment::Center),
+                        })
+                        .into_any_flex(),
+                    ])
+                    .cross_axis_alignment(CrossAxisAlignment::Center)
+                    .into_any_flex(),
                     text_input(src_buf.clone(), |st: &mut StudioState, next: String| {
                         st.source_buffer = next;
-                    }),
-                    prose(src_buf),
-                ))
+                    })
+                    .into_any_flex(),
+                    prose(src_buf).into_any_flex(),
+                ])
                 .padding(8.0)
                 .background_color(pal.bg_inset)
                 .border(pal.border_hairline, 1.0)
-                .corner_radius(8.0),
+                .corner_radius(8.0)
+                .into_any_flex(),
             );
         }
         LeftDockTab::Catalog => {
@@ -317,27 +358,36 @@ fn left_dock_view(
                 let btn_label = format!("+ {}", item.label);
                 let desc = format!("{} — {}", item.category, item.description);
                 items.push(
-                    flex_col((
-                        flex_row((
-                            kind_badge_chip(cat_badge, pal),
+                    flex_col(vec![
+                        flex_row(vec![
+                            kind_badge_chip(cat_badge, pal).into_any_flex(),
                             text_button(btn_label, move |st: &mut StudioState| {
                                 let _ = st.insert_catalog_item(item_id);
-                            }),
-                        ))
-                        .cross_axis_alignment(CrossAxisAlignment::Center),
-                        label(desc).text_size(11.0).color(pal.text_muted),
-                    ))
+                            })
+                            .into_any_flex(),
+                        ])
+                        .cross_axis_alignment(CrossAxisAlignment::Center)
+                        .into_any_flex(),
+                        label(desc)
+                            .text_size(11.0)
+                            .color(pal.text_muted)
+                            .into_any_flex(),
+                    ])
                     .padding(7.0)
                     .background_color(pal.bg_surface)
                     .border(pal.border_hairline, 1.0)
-                    .corner_radius(8.0),
+                    .corner_radius(8.0)
+                    .into_any_flex(),
                 );
             }
         }
     }
 
-    flex_col((tab_strip, portal(flex_col(items).padding(8.0)).flex(1.0)))
-        .background_color(pal.bg_surface)
+    flex_col(vec![
+        tab_strip.into_any_flex(),
+        flex_col(items).padding(8.0).flex(1.0).into_any_flex(),
+    ])
+    .background_color(pal.bg_surface)
 }
 
 #[cfg(feature = "xilem-ui")]
@@ -373,12 +423,13 @@ fn preview_pane_view(
     };
 
     // Top Breadcrumb & Viewport Guides Bar (Hyperframes PreviewPane + PreviewZoomOverlay)
-    let viewport_hud = flex_row((
+    let viewport_hud = flex_row(vec![
         label(sel_crumb)
             .weight(FontWeight::SEMI_BOLD)
             .text_size(11.5)
-            .color(pal.text_primary),
-        FlexSpacer::Flex(1.0),
+            .color(pal.text_primary)
+            .into_any_flex(),
+        FlexSpacer::Flex(1.0).into_any_flex(),
         checkbox(
             "Bounds",
             state.show_bounding_boxes,
@@ -386,7 +437,8 @@ fn preview_pane_view(
                 st.show_bounding_boxes = v;
                 let _ = st.render_current_frame();
             },
-        ),
+        )
+        .into_any_flex(),
         checkbox(
             "Topology Lens",
             state.topology_lens_active,
@@ -394,7 +446,8 @@ fn preview_pane_view(
                 st.topology_lens_active = v;
                 let _ = st.render_current_frame();
             },
-        ),
+        )
+        .into_any_flex(),
         checkbox(
             "Grid 3×3",
             state.show_grid_overlay,
@@ -402,7 +455,8 @@ fn preview_pane_view(
                 st.show_grid_overlay = v;
                 let _ = st.render_current_frame();
             },
-        ),
+        )
+        .into_any_flex(),
         checkbox(
             "Safe Area",
             state.show_safe_guides,
@@ -410,20 +464,24 @@ fn preview_pane_view(
                 st.show_safe_guides = v;
                 let _ = st.render_current_frame();
             },
-        ),
+        )
+        .into_any_flex(),
         text_button("−", |st: &mut StudioState| {
             st.viewport_zoom = (st.viewport_zoom - 0.25).clamp(0.25, 4.0);
-        }),
+        })
+        .into_any_flex(),
         text_button(
             format!("{:.0}%", state.viewport_zoom * 100.0),
             |st: &mut StudioState| {
                 st.viewport_zoom = 1.0;
             },
-        ),
+        )
+        .into_any_flex(),
         text_button("+", |st: &mut StudioState| {
             st.viewport_zoom = (st.viewport_zoom + 0.25).clamp(0.25, 4.0);
-        }),
-    ))
+        })
+        .into_any_flex(),
+    ])
     .cross_axis_alignment(CrossAxisAlignment::Center)
     .padding(6.0)
     .background_color(pal.bg_inset)
@@ -447,31 +505,52 @@ fn preview_pane_view(
         state.audio_volume,
         state.current_time,
     );
-    let meter_strip = if state.show_audio_meters && has_audio {
-        flex_row((
-            label("AUDIO L").text_size(10.0).color(pal.accent_mint),
-            progress_bar(Some(f64::from(lvl_l))).flex(1.0),
-            label("R").text_size(10.0).color(pal.accent_mint),
-            progress_bar(Some(f64::from(lvl_r))).flex(1.0),
-            label(if state.audio_muted {
-                "MUTED".to_string()
-            } else {
-                format!("{:+.1} dBFS", (lvl_l.max(0.01)).log10() * 20.0)
-            })
-            .text_size(10.0)
-            .color(pal.text_muted),
-        ))
-        .cross_axis_alignment(CrossAxisAlignment::Center)
-        .padding(4.0)
-        .background_color(pal.bg_inset)
-    } else {
-        flex_row((label("").text_size(1.0),)).padding(0.0).background_color(pal.bg_inset)
-    };
+    let meter_strip: Box<xilem::AnyWidgetView<StudioState>> =
+        if state.show_audio_meters && has_audio {
+            flex_row(vec![
+                label("AUDIO L")
+                    .text_size(10.0)
+                    .color(pal.accent_mint)
+                    .into_any_flex(),
+                progress_bar(Some(f64::from(lvl_l)))
+                    .flex(1.0)
+                    .into_any_flex(),
+                label("R")
+                    .text_size(10.0)
+                    .color(pal.accent_mint)
+                    .into_any_flex(),
+                progress_bar(Some(f64::from(lvl_r)))
+                    .flex(1.0)
+                    .into_any_flex(),
+                label(if state.audio_muted {
+                    "MUTED".to_string()
+                } else {
+                    format!("{:+.1} dBFS", (lvl_l.max(0.01)).log10() * 20.0)
+                })
+                .text_size(10.0)
+                .color(pal.text_muted)
+                .into_any_flex(),
+            ])
+            .cross_axis_alignment(CrossAxisAlignment::Center)
+            .padding(4.0)
+            .background_color(pal.bg_inset)
+            .boxed()
+        } else {
+            flex_row(vec![label("").text_size(1.0).into_any_flex()])
+                .padding(0.0)
+                .background_color(pal.bg_inset)
+                .boxed()
+        };
 
     let transport = transport_controls_view(state, pal);
 
-    flex_col((viewport_hud, canvas_stage.flex(1.0), meter_strip, transport))
-        .background_color(pal.bg_preview_well)
+    flex_col(vec![
+        viewport_hud.into_any_flex(),
+        canvas_stage.flex(1.0).into_any_flex(),
+        meter_strip.into_any_flex(),
+        transport.into_any_flex(),
+    ])
+    .background_color(pal.bg_preview_well)
 }
 
 #[cfg(feature = "xilem-ui")]
@@ -479,20 +558,26 @@ fn transport_controls_view(
     state: &mut StudioState,
     pal: StudioPalette,
 ) -> impl WidgetView<StudioState> + use<> {
-    let play_label = if state.is_playing { "⏸ Pause" } else { "▶ Play" };
+    let play_label = if state.is_playing {
+        "⏸ Pause"
+    } else {
+        "▶ Play"
+    };
     let timecode = state.formatted_timecode();
     let dur = state.duration.max(0.1);
     let cur = state.current_time.clamp(0.0, dur);
     let speed_label = format!("{:.2}x", state.playback_rate);
 
-    flex_row((
+    flex_row(vec![
         text_button("⏮", |st: &mut StudioState| {
             st.is_playing = false;
             st.seek_to(0.0, false);
-        }),
+        })
+        .into_any_flex(),
         text_button("◀ -1f", |st: &mut StudioState| {
             st.step_frames(-1);
-        }),
+        })
+        .into_any_flex(),
         sized_box(text_button(play_label, |st: &mut StudioState| {
             st.is_playing = !st.is_playing;
             if st.is_playing {
@@ -501,22 +586,27 @@ fn transport_controls_view(
         }))
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
-        .corner_radius(6.0),
+        .corner_radius(6.0)
+        .into_any_flex(),
         text_button("+1f ▶", |st: &mut StudioState| {
             st.step_frames(1);
-        }),
+        })
+        .into_any_flex(),
         text_button("⏭", |st: &mut StudioState| {
             st.is_playing = false;
             let end = st.duration;
             st.seek_to(end, false);
-        }),
+        })
+        .into_any_flex(),
         text_button(timecode, |st: &mut StudioState| {
             st.show_frames = !st.show_frames;
-        }),
+        })
+        .into_any_flex(),
         slider(0.0, dur, cur, |st: &mut StudioState, val: f64| {
             st.seek_to(val, true);
         })
-        .flex(1.0),
+        .flex(1.0)
+        .into_any_flex(),
         text_button(speed_label, |st: &mut StudioState| {
             st.playback_rate = match st.playback_rate {
                 r if (r - 0.5).abs() < 0.01 => 1.0,
@@ -524,14 +614,25 @@ fn transport_controls_view(
                 r if (r - 1.5).abs() < 0.01 => 2.0,
                 _ => 0.5,
             };
-        }),
-        checkbox("Loop", state.loop_enabled, |st: &mut StudioState, v: bool| {
-            st.loop_enabled = v;
-        }),
-        checkbox("Mute", state.audio_muted, |st: &mut StudioState, v: bool| {
-            st.audio_muted = v;
-        }),
-    ))
+        })
+        .into_any_flex(),
+        checkbox(
+            "Loop",
+            state.loop_enabled,
+            |st: &mut StudioState, v: bool| {
+                st.loop_enabled = v;
+            },
+        )
+        .into_any_flex(),
+        checkbox(
+            "Mute",
+            state.audio_muted,
+            |st: &mut StudioState, v: bool| {
+                st.audio_muted = v;
+            },
+        )
+        .into_any_flex(),
+    ])
     .cross_axis_alignment(CrossAxisAlignment::Center)
     .padding(6.0)
     .background_color(pal.bg_surface)
@@ -549,76 +650,116 @@ fn timeline_pane_view(
     let zoom_val = f64::from(state.timeline_zoom_pps.clamp(40.0, 400.0));
 
     // Hyperframes TimelineToolbar parity: History | Snap & Ripple & Meters | Keyframe & Auto-KF | Split/Dup/Del | Zoom Slider + Fit
-    let toolbar = flex_row((
+    let history_group = flex_row(vec![
         text_button(undo_label, |st: &mut StudioState| {
             let _ = st.undo();
-        }),
+        })
+        .into_any_flex(),
         text_button(redo_label, |st: &mut StudioState| {
             let _ = st.redo();
-        }),
-        label("|").text_size(11.0).color(pal.border_strong),
+        })
+        .into_any_flex(),
+        label("|")
+            .text_size(11.0)
+            .color(pal.border_strong)
+            .into_any_flex(),
         checkbox(
             "🧲 Snap (N)",
             state.timeline_snap_enabled,
             |st: &mut StudioState, v: bool| {
                 st.timeline_snap_enabled = v;
             },
-        ),
+        )
+        .into_any_flex(),
         checkbox(
             "≋ Ripple",
             state.ripple_edit,
             |st: &mut StudioState, v: bool| {
                 st.ripple_edit = v;
             },
-        ),
+        )
+        .into_any_flex(),
         checkbox(
             "📊 Meters",
             state.show_audio_meters,
             |st: &mut StudioState, v: bool| {
                 st.show_audio_meters = v;
             },
-        ),
-        label("|").text_size(11.0).color(pal.border_strong),
+        )
+        .into_any_flex(),
+    ])
+    .cross_axis_alignment(CrossAxisAlignment::Center);
+
+    let keyframe_group = flex_row(vec![
+        label("|")
+            .text_size(11.0)
+            .color(pal.border_strong)
+            .into_any_flex(),
         text_button("◀ KF", |st: &mut StudioState| {
             st.timeline_jump_prev_keyframe();
-        }),
+        })
+        .into_any_flex(),
         sized_box(text_button("◆ +KF (K)", |st: &mut StudioState| {
             let _ = st.timeline_add_keyframe_at_playhead();
         }))
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
-        .corner_radius(5.0),
+        .corner_radius(5.0)
+        .into_any_flex(),
         text_button("KF ▶", |st: &mut StudioState| {
             st.timeline_jump_next_keyframe();
-        }),
+        })
+        .into_any_flex(),
         checkbox(
             "● Auto-KF",
             state.auto_keyframe,
             |st: &mut StudioState, v: bool| {
                 st.auto_keyframe = v;
             },
-        ),
-        label("|").text_size(11.0).color(pal.border_strong),
+        )
+        .into_any_flex(),
+    ])
+    .cross_axis_alignment(CrossAxisAlignment::Center);
+
+    let edit_group = flex_row(vec![
+        label("|")
+            .text_size(11.0)
+            .color(pal.border_strong)
+            .into_any_flex(),
         text_button("✂ Split (S)", |st: &mut StudioState| {
             let _ = st.timeline_split_at_playhead();
-        }),
+        })
+        .into_any_flex(),
         text_button("⧉ Dup", |st: &mut StudioState| {
             let _ = st.timeline_duplicate_selected();
-        }),
+        })
+        .into_any_flex(),
         text_button("⌫ Del", |st: &mut StudioState| {
             let _ = st.timeline_delete_selected();
-        }),
-        FlexSpacer::Flex(1.0),
+        })
+        .into_any_flex(),
+    ])
+    .cross_axis_alignment(CrossAxisAlignment::Center);
+
+    let toolbar = flex_row(vec![
+        history_group.into_any_flex(),
+        keyframe_group.into_any_flex(),
+        edit_group.into_any_flex(),
+        FlexSpacer::Flex(1.0).into_any_flex(),
         text_button("Fit", |st: &mut StudioState| {
             st.timeline_zoom_pps = 140.0;
-        }),
+        })
+        .into_any_flex(),
         slider(40.0, 360.0, zoom_val, |st: &mut StudioState, v: f64| {
             st.timeline_zoom_pps = v as f32;
-        }),
+        })
+        .flex(1.0)
+        .into_any_flex(),
         label(format!("{zoom_pct}%"))
             .text_size(11.0)
-            .color(pal.text_muted),
-    ))
+            .color(pal.text_muted)
+            .into_any_flex(),
+    ])
     .cross_axis_alignment(CrossAxisAlignment::Center)
     .padding(5.0)
     .background_color(pal.bg_inset)
@@ -626,7 +767,7 @@ fn timeline_pane_view(
 
     // Sticky Two-Column Time Ruler: Left 230px gutter header + Right proportional tick ruler with Playhead badge
     let ticks = generate_ruler_ticks(state.duration, state.timeline_zoom_pps);
-    let mut tick_buttons: Vec<_> = Vec::new();
+    let mut tick_buttons: Vec<AnyFlexChild<StudioState>> = Vec::new();
     let playhead_sec = state.current_time;
     tick_buttons.push(
         sized_box(
@@ -638,17 +779,21 @@ fn timeline_pane_view(
         .padding(2.0)
         .background_color(pal.accent_mint_wash)
         .border(pal.accent_mint, 1.0)
-        .corner_radius(4.0),
+        .corner_radius(4.0)
+        .into_any_flex(),
     );
     for tick in ticks.into_iter().filter(|t| t.is_major) {
         let t_sec = tick.time_sec;
         let lbl = tick.label.unwrap_or_else(|| format!("{t_sec:.1}s"));
-        tick_buttons.push(text_button(lbl, move |st: &mut StudioState| {
-            st.seek_to(t_sec, false);
-        }));
+        tick_buttons.push(
+            text_button(lbl, move |st: &mut StudioState| {
+                st.seek_to(t_sec, false);
+            })
+            .into_any_flex(),
+        );
     }
 
-    let ruler_bar = flex_row((
+    let ruler_bar = flex_row(vec![
         sized_box(
             label(format!(
                 "TRACKS & NODES · F{:03}",
@@ -658,21 +803,23 @@ fn timeline_pane_view(
             .text_size(10.5)
             .color(pal.text_muted),
         )
-        .width(230.px())
+        .width(230.0.px())
         .padding(4.0)
-        .background_color(pal.bg_inset),
+        .background_color(pal.bg_inset)
+        .into_any_flex(),
         flex_row(tick_buttons)
             .cross_axis_alignment(CrossAxisAlignment::Center)
-            .flex(1.0)
             .padding(3.0)
-            .background_color(pal.bg_surface),
-    ))
+            .background_color(pal.bg_surface)
+            .flex(1.0)
+            .into_any_flex(),
+    ])
     .border(pal.border_strong, 1.0);
 
     // Two-Column NLE Track Lanes: Left 230px Gutter + Right Proportional Clip Pill Bars
     let pps = f64::from(state.timeline_zoom_pps.clamp(40.0, 360.0));
     let tracks = state.build_timeline_tracks();
-    let mut track_rows: Vec<_> = Vec::new();
+    let mut track_rows: Vec<AnyFlexChild<StudioState>> = Vec::new();
 
     for track in tracks {
         let is_selected = track.selected;
@@ -710,16 +857,17 @@ fn timeline_pane_view(
                 };
 
                 let left_gutter = sized_box(
-                    flex_row((
-                        kind_badge_chip(kind_badge, pal),
+                    flex_row(vec![
+                        kind_badge_chip(kind_badge, pal).into_any_flex(),
                         text_button(gutter_title, move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
                             let _ = st.render_current_frame();
-                        }),
-                    ))
+                        })
+                        .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center),
                 )
-                .width(230.px())
+                .width(230.0.px())
                 .padding(4.0)
                 .background_color(if is_selected {
                     pal.bg_raised
@@ -729,25 +877,28 @@ fn timeline_pane_view(
                 .border(pal.border_hairline, 1.0);
 
                 let clip_pill = sized_box(
-                    flex_row((
+                    flex_row(vec![
                         label(format!(
                             "{} ({:.2}s–{:.2}s)",
                             track.label, track.start_sec, track.end_sec
                         ))
                         .weight(FontWeight::SEMI_BOLD)
                         .text_size(11.0)
-                        .color(pal.text_primary),
-                        FlexSpacer::Flex(1.0),
-                        flex_row(kf_chips),
+                        .color(pal.text_primary)
+                        .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
+                        flex_row(kf_chips).into_any_flex(),
                         text_button("-0.1s", move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
                             let _ = st.timeline_shift_selected(-0.1);
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("+0.1s", move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
                             let _ = st.timeline_shift_selected(0.1);
-                        }),
-                    ))
+                        })
+                        .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
                     .padding(4.0),
                 )
@@ -756,17 +907,24 @@ fn timeline_pane_view(
                 .border(clip_border, 1.0)
                 .corner_radius(8.0);
 
-                let right_lane = flex_row((
-                    FlexSpacer::Fixed(left_px.px()),
-                    clip_pill,
-                    FlexSpacer::Flex(1.0),
-                ))
+                let right_lane = flex_row(vec![
+                    FlexSpacer::Fixed(left_px.px()).into_any_flex(),
+                    clip_pill.into_any_flex(),
+                    FlexSpacer::Flex(1.0).into_any_flex(),
+                ])
                 .cross_axis_alignment(CrossAxisAlignment::Center)
-                .flex(1.0)
                 .padding(3.0)
-                .background_color(pal.bg_surface);
+                .background_color(pal.bg_surface)
+                .flex(1.0);
 
-                track_rows.push(flex_row((left_gutter, right_lane)).border(pal.border_hairline, 1.0));
+                track_rows.push(
+                    flex_row(vec![
+                        left_gutter.into_any_flex(),
+                        right_lane.into_any_flex(),
+                    ])
+                    .border(pal.border_hairline, 1.0)
+                    .into_any_flex(),
+                );
             }
             TimelineTrackKind::AnimationProperty {
                 node_id,
@@ -776,32 +934,38 @@ fn timeline_pane_view(
                 let nid = node_id;
                 let prop = property.clone();
                 let left_gutter = sized_box(
-                    flex_row((
-                        label("   ↳").text_size(11.0).color(pal.accent_mint),
+                    flex_row(vec![
+                        label("   ↳")
+                            .text_size(11.0)
+                            .color(pal.accent_mint)
+                            .into_any_flex(),
                         text_button(property.clone(), move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
                             st.active_anim_property = prop.clone();
                             let _ = st.render_current_frame();
-                        }),
+                        })
+                        .into_any_flex(),
                         label(format!("({easing})"))
                             .text_size(10.0)
-                            .color(pal.text_muted),
-                    ))
+                            .color(pal.text_muted)
+                            .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center),
                 )
-                .width(230.px())
+                .width(230.0.px())
                 .padding(3.0)
                 .background_color(pal.bg_inset)
                 .border(pal.border_hairline, 1.0);
 
                 let kf_bar = sized_box(
-                    flex_row((
+                    flex_row(vec![
                         label(format!("{:.2}s..{:.2}s", track.start_sec, track.end_sec))
                             .text_size(10.5)
-                            .color(pal.accent_mint),
-                        FlexSpacer::Flex(1.0),
-                        flex_row(kf_chips),
-                    ))
+                            .color(pal.accent_mint)
+                            .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
+                        flex_row(kf_chips).into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
                     .padding(3.0),
                 )
@@ -810,46 +974,55 @@ fn timeline_pane_view(
                 .border(pal.accent_mint, 1.0)
                 .corner_radius(6.0);
 
-                let right_lane = flex_row((
-                    FlexSpacer::Fixed(left_px.px()),
-                    kf_bar,
-                    FlexSpacer::Flex(1.0),
-                ))
+                let right_lane = flex_row(vec![
+                    FlexSpacer::Fixed(left_px.px()).into_any_flex(),
+                    kf_bar.into_any_flex(),
+                    FlexSpacer::Flex(1.0).into_any_flex(),
+                ])
                 .cross_axis_alignment(CrossAxisAlignment::Center)
-                .flex(1.0)
                 .padding(2.0)
-                .background_color(pal.bg_surface);
+                .background_color(pal.bg_surface)
+                .flex(1.0);
 
-                track_rows.push(flex_row((left_gutter, right_lane)).border(pal.border_hairline, 1.0));
+                track_rows.push(
+                    flex_row(vec![
+                        left_gutter.into_any_flex(),
+                        right_lane.into_any_flex(),
+                    ])
+                    .border(pal.border_hairline, 1.0)
+                    .into_any_flex(),
+                );
             }
             TimelineTrackKind::AudioTrack { track_index } => {
                 let left_gutter = sized_box(
-                    flex_row((
-                        kind_badge_chip("AUD", pal),
+                    flex_row(vec![
+                        kind_badge_chip("AUD", pal).into_any_flex(),
                         text_button(track.label.clone(), move |st: &mut StudioState| {
                             if let Some(audio) = &mut st.scene_def.audio {
                                 if let Some(tr) = audio.tracks.get_mut(track_index) {
                                     tr.muted = !tr.muted;
                                 }
                             }
-                        }),
-                    ))
+                        })
+                        .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center),
                 )
-                .width(230.px())
+                .width(230.0.px())
                 .padding(4.0)
                 .background_color(pal.bg_inset)
                 .border(pal.border_hairline, 1.0);
 
                 // Hyperframes violet audio pill (`--timeline-clip-audio-bg`) with simulated waveform bars
                 let audio_pill = sized_box(
-                    flex_row((
+                    flex_row(vec![
                         label(format!("♫ {} · ▁▃▅▇▃▂▄▆█▆▄▂", track.subtitle))
                             .weight(FontWeight::SEMI_BOLD)
                             .text_size(11.0)
-                            .color(pal.text_primary),
-                        FlexSpacer::Flex(1.0),
-                    ))
+                            .color(pal.text_primary)
+                            .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
                     .padding(5.0),
                 )
@@ -858,26 +1031,33 @@ fn timeline_pane_view(
                 .border(pal.border_strong, 1.0)
                 .corner_radius(10.0);
 
-                let right_lane = flex_row((
-                    FlexSpacer::Fixed(left_px.px()),
-                    audio_pill,
-                    FlexSpacer::Flex(1.0),
-                ))
+                let right_lane = flex_row(vec![
+                    FlexSpacer::Fixed(left_px.px()).into_any_flex(),
+                    audio_pill.into_any_flex(),
+                    FlexSpacer::Flex(1.0).into_any_flex(),
+                ])
                 .cross_axis_alignment(CrossAxisAlignment::Center)
-                .flex(1.0)
                 .padding(3.0)
-                .background_color(pal.bg_surface);
+                .background_color(pal.bg_surface)
+                .flex(1.0);
 
-                track_rows.push(flex_row((left_gutter, right_lane)).border(pal.border_hairline, 1.0));
+                track_rows.push(
+                    flex_row(vec![
+                        left_gutter.into_any_flex(),
+                        right_lane.into_any_flex(),
+                    ])
+                    .border(pal.border_hairline, 1.0)
+                    .into_any_flex(),
+                );
             }
         }
     }
 
-    flex_col((
-        toolbar,
-        ruler_bar,
-        portal(flex_col(track_rows)).flex(1.0),
-    ))
+    flex_col(vec![
+        toolbar.into_any_flex(),
+        ruler_bar.into_any_flex(),
+        flex_col(track_rows).flex(1.0).into_any_flex(),
+    ])
     .background_color(pal.bg_surface)
 }
 
@@ -887,37 +1067,41 @@ fn right_dock_view(
     pal: StudioPalette,
 ) -> impl WidgetView<StudioState> + use<> {
     let cur_tab = state.right_tab;
-    let tab_strip = flex_row((
+    let tab_strip = flex_row(vec![
         dock_tab_pill(
             RightDockTab::Design.label(),
             cur_tab == RightDockTab::Design,
             pal,
             |st: &mut StudioState| st.right_tab = RightDockTab::Design,
-        ),
+        )
+        .into_any_flex(),
         dock_tab_pill(
             RightDockTab::Layers.label(),
             cur_tab == RightDockTab::Layers,
             pal,
             |st: &mut StudioState| st.right_tab = RightDockTab::Layers,
-        ),
+        )
+        .into_any_flex(),
         dock_tab_pill(
             RightDockTab::AiAgent.label(),
             cur_tab == RightDockTab::AiAgent,
             pal,
             |st: &mut StudioState| st.right_tab = RightDockTab::AiAgent,
-        ),
+        )
+        .into_any_flex(),
         dock_tab_pill(
             RightDockTab::Renders.label(),
             cur_tab == RightDockTab::Renders,
             pal,
             |st: &mut StudioState| st.right_tab = RightDockTab::Renders,
-        ),
-    ))
+        )
+        .into_any_flex(),
+    ])
     .padding(6.0)
     .background_color(pal.bg_inset)
     .border(pal.border_hairline, 1.0);
 
-    let mut sections: Vec<_> = Vec::new();
+    let mut sections: Vec<AnyFlexChild<StudioState>> = Vec::new();
     match state.right_tab {
         RightDockTab::Design => {
             if let Some(snap) = state.inspect_selected_node() {
@@ -927,22 +1111,29 @@ fn right_dock_view(
 
                 // 1. PropertyPanelFlatHeader (Kind badge + Name + Vis + Copy Prompt + Clear + All toggle)
                 sections.push(
-                    flex_row((
-                        kind_badge_chip(snap.kind_badge, pal),
+                    flex_row(vec![
+                        kind_badge_chip(snap.kind_badge, pal).into_any_flex(),
                         label(snap.label.clone())
                             .weight(FontWeight::BOLD)
                             .text_size(12.5)
-                            .color(pal.text_primary),
-                        FlexSpacer::Flex(1.0),
+                            .color(pal.text_primary)
+                            .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
                         text_button("👁", move |st: &mut StudioState| {
                             let _ = st.layer_toggle_visibility(nid);
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("📋", |st: &mut StudioState| {
                             let _ = st.generate_selected_element_prompt("");
                             st.right_tab = RightDockTab::AiAgent;
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button(
-                            if show_all { " Accordion " } else { " Expand All " },
+                            if show_all {
+                                " Accordion "
+                            } else {
+                                " Expand All "
+                            },
                             |st: &mut StudioState| {
                                 st.open_inspector_group = if st.open_inspector_group == "all" {
                                     "layout".to_string()
@@ -950,13 +1141,15 @@ fn right_dock_view(
                                     "all".to_string()
                                 };
                             },
-                        ),
-                    ))
+                        )
+                        .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
                     .padding(8.0)
                     .background_color(pal.bg_raised)
                     .border(pal.border_hairline, 1.0)
-                    .corner_radius(8.0),
+                    .corner_radius(8.0)
+                    .into_any_flex(),
                 );
 
                 // 2. Collapsible Group: Layout & Alignment
@@ -982,74 +1175,97 @@ fn right_dock_view(
                             };
                         },
                     ))
-                    .expand_width(),
+                    .expand_width()
+                    .into_any_flex(),
                 );
                 if layout_open {
                     sections.push(
-                        flex_col((
-                            flex_row((
+                        flex_col(vec![
+                            flex_row(vec![
                                 text_button("◰ Left", |st: &mut StudioState| {
                                     let _ = st.inspector_align_selected(Some("left"), None);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("◫ Center H", |st: &mut StudioState| {
                                     let _ = st.inspector_align_selected(Some("center"), None);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("◳ Right", |st: &mut StudioState| {
                                     let _ = st.inspector_align_selected(Some("right"), None);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("⬓ Middle V", |st: &mut StudioState| {
                                     let _ = st.inspector_align_selected(None, Some("middle"));
-                                }),
-                            )),
-                            flex_row((
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                            flex_row(vec![
                                 text_button("X -10", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_position(-10.0, 0.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("X +10", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_position(10.0, 0.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Y -10", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_position(0.0, -10.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Y +10", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_position(0.0, 10.0);
-                                }),
-                            )),
-                            flex_row((
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                            flex_row(vec![
                                 text_button("W -16", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_size(-16.0, 0.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("W +16", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_size(16.0, 0.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("H -16", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_size(0.0, -16.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("H +16", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_size(0.0, 16.0);
-                                }),
-                            )),
-                            flex_row((
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                            flex_row(vec![
                                 text_button("Rot -15°", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_rotation(-15.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Rot +15°", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_rotation(15.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Scale -0.1", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_scale(-0.1);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Scale +0.1", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_scale(0.1);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Reset", |st: &mut StudioState| {
                                     let _ = st.inspector_reset_transform();
-                                }),
-                            )),
-                        ))
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                        ])
                         .padding(8.0)
                         .background_color(pal.bg_inset)
-                        .border(pal.border_hairline, 1.0),
+                        .border(pal.border_hairline, 1.0)
+                        .into_any_flex(),
                     );
                 }
 
@@ -1080,47 +1296,60 @@ fn right_dock_view(
                             };
                         },
                     ))
-                    .expand_width(),
+                    .expand_width()
+                    .into_any_flex(),
                 );
                 if style_open {
                     let op = f64::from(snap.opacity);
                     sections.push(
-                        flex_col((
+                        flex_col(vec![
                             label(format!("Opacity: {:.0}%", snap.opacity * 100.0))
                                 .text_size(11.0)
-                                .color(pal.text_secondary),
+                                .color(pal.text_secondary)
+                                .into_any_flex(),
                             slider(0.0, 1.0, op, |st: &mut StudioState, v: f64| {
                                 let _ = st.inspector_set_opacity(v as f32);
-                            }),
+                            })
+                            .into_any_flex(),
                             text_input(cur_color, |st: &mut StudioState, hex: String| {
                                 let _ = st.inspector_set_fill(&hex);
-                            }),
-                            flex_row((
+                            })
+                            .into_any_flex(),
+                            flex_row(vec![
                                 text_button("#3ce6ac Mint", |st: &mut StudioState| {
                                     let _ = st.inspector_set_fill("#3ce6ac");
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("#06e3fa Cyan", |st: &mut StudioState| {
                                     let _ = st.inspector_set_fill("#06e3fa");
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("#f43f5e Rose", |st: &mut StudioState| {
                                     let _ = st.inspector_set_fill("#f43f5e");
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("#f59e0b Amber", |st: &mut StudioState| {
                                     let _ = st.inspector_set_fill("#f59e0b");
-                                }),
-                            )),
-                            flex_row((
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                            flex_row(vec![
                                 text_button("Radius -4", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_corner_radius(-4.0);
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("Radius +4", |st: &mut StudioState| {
                                     let _ = st.inspector_nudge_corner_radius(4.0);
-                                }),
-                            )),
-                        ))
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                        ])
                         .padding(8.0)
                         .background_color(pal.bg_inset)
-                        .border(pal.border_hairline, 1.0),
+                        .border(pal.border_hairline, 1.0)
+                        .into_any_flex(),
                     );
                 }
 
@@ -1143,35 +1372,44 @@ fn right_dock_view(
                                 };
                             },
                         ))
-                        .expand_width(),
+                        .expand_width()
+                        .into_any_flex(),
                     );
                     if text_open {
                         sections.push(
-                            flex_col((
+                            flex_col(vec![
                                 text_input(txt, |st: &mut StudioState, next: String| {
                                     let _ = st.inspector_set_text_content(&next);
-                                }),
-                                flex_row((
+                                })
+                                .into_any_flex(),
+                                flex_row(vec![
                                     text_button("Size -2", |st: &mut StudioState| {
                                         let _ = st.inspector_nudge_font_size(-2.0);
-                                    }),
+                                    })
+                                    .into_any_flex(),
                                     text_button("Size +2", |st: &mut StudioState| {
                                         let _ = st.inspector_nudge_font_size(2.0);
-                                    }),
+                                    })
+                                    .into_any_flex(),
                                     text_button("Left", |st: &mut StudioState| {
                                         let _ = st.inspector_set_text_align("left");
-                                    }),
+                                    })
+                                    .into_any_flex(),
                                     text_button("Center", |st: &mut StudioState| {
                                         let _ = st.inspector_set_text_align("center");
-                                    }),
+                                    })
+                                    .into_any_flex(),
                                     text_button("Right", |st: &mut StudioState| {
                                         let _ = st.inspector_set_text_align("right");
-                                    }),
-                                )),
-                            ))
+                                    })
+                                    .into_any_flex(),
+                                ])
+                                .into_any_flex(),
+                            ])
                             .padding(8.0)
                             .background_color(pal.bg_inset)
-                            .border(pal.border_hairline, 1.0),
+                            .border(pal.border_hairline, 1.0)
+                            .into_any_flex(),
                         );
                     }
                 }
@@ -1199,50 +1437,63 @@ fn right_dock_view(
                             };
                         },
                     ))
-                    .expand_width(),
+                    .expand_width()
+                    .into_any_flex(),
                 );
                 if motion_open {
                     sections.push(
-                        flex_col((
-                            flex_row((
+                        flex_col(vec![
+                            flex_row(vec![
                                 text_button("translateX", |st: &mut StudioState| {
                                     st.active_anim_property = "translateX".to_string();
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("translateY", |st: &mut StudioState| {
                                     st.active_anim_property = "translateY".to_string();
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("opacity", |st: &mut StudioState| {
                                     st.active_anim_property = "opacity".to_string();
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("scale", |st: &mut StudioState| {
                                     st.active_anim_property = "scale".to_string();
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("rotation", |st: &mut StudioState| {
                                     st.active_anim_property = "rotation".to_string();
-                                }),
-                            )),
-                            flex_row((
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                            flex_row(vec![
                                 text_button("linear", |st: &mut StudioState| {
                                     let p = st.active_anim_property.clone();
                                     let _ = st.inspector_set_easing(&p, "linear");
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("easeOut", |st: &mut StudioState| {
                                     let p = st.active_anim_property.clone();
                                     let _ = st.inspector_set_easing(&p, "easeOut");
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("easeOutCubic", |st: &mut StudioState| {
                                     let p = st.active_anim_property.clone();
                                     let _ = st.inspector_set_easing(&p, "easeOutCubic");
-                                }),
+                                })
+                                .into_any_flex(),
                                 text_button("spring", |st: &mut StudioState| {
                                     let p = st.active_anim_property.clone();
                                     let _ = st.inspector_set_easing(&p, "spring(180, 18)");
-                                }),
-                            )),
-                        ))
+                                })
+                                .into_any_flex(),
+                            ])
+                            .into_any_flex(),
+                        ])
                         .padding(8.0)
                         .background_color(pal.bg_inset)
-                        .border(pal.border_hairline, 1.0),
+                        .border(pal.border_hairline, 1.0)
+                        .into_any_flex(),
                     );
                 }
 
@@ -1271,52 +1522,69 @@ fn right_dock_view(
                             };
                         },
                     ))
-                    .expand_width(),
+                    .expand_width()
+                    .into_any_flex(),
                 );
                 if fx_open {
-                    let mut fx_rows: Vec<_> = Vec::new();
+                    let mut fx_rows: Vec<AnyFlexChild<StudioState>> = Vec::new();
                     for (u_name, u_val) in &snap.shader_uniforms {
                         let key = u_name.clone();
                         let val_f64 = f64::from(*u_val);
                         let max_range = if key == "density" { 360.0 } else { 2.0 };
                         fx_rows.push(
-                            flex_row((
+                            flex_row(vec![
                                 label(format!("{u_name}: {u_val:.3}"))
                                     .text_size(11.0)
-                                    .color(pal.accent_cyan),
-                                slider(0.0, max_range, val_f64, move |st: &mut StudioState, v: f64| {
-                                    let _ = st.inspector_set_shader_uniform_f32(&key, v as f32);
-                                })
-                                .flex(1.0),
-                            ))
-                            .cross_axis_alignment(CrossAxisAlignment::Center),
+                                    .color(pal.accent_cyan)
+                                    .into_any_flex(),
+                                slider(
+                                    0.0,
+                                    max_range,
+                                    val_f64,
+                                    move |st: &mut StudioState, v: f64| {
+                                        let _ = st.inspector_set_shader_uniform_f32(&key, v as f32);
+                                    },
+                                )
+                                .flex(1.0)
+                                .into_any_flex(),
+                            ])
+                            .cross_axis_alignment(CrossAxisAlignment::Center)
+                            .into_any_flex(),
                         );
                     }
-                    fx_rows.push(flex_row((
-                        text_button("+ Vignette", |st: &mut StudioState| {
-                            let _ = st.insert_catalog_item("shader-vignette");
-                        }),
-                        text_button("+ Film Grain", |st: &mut StudioState| {
-                            let _ = st.insert_catalog_item("shader-film-grain");
-                        }),
-                        text_button("+ Chromatic", |st: &mut StudioState| {
-                            let _ = st.insert_catalog_item("shader-chromatic");
-                        }),
-                        text_button("+ Scanlines", |st: &mut StudioState| {
-                            let _ = st.insert_catalog_item("shader-scanlines");
-                        }),
-                    )));
+                    fx_rows.push(
+                        flex_row(vec![
+                            text_button("+ Vignette", |st: &mut StudioState| {
+                                let _ = st.insert_catalog_item("shader-vignette");
+                            })
+                            .into_any_flex(),
+                            text_button("+ Film Grain", |st: &mut StudioState| {
+                                let _ = st.insert_catalog_item("shader-film-grain");
+                            })
+                            .into_any_flex(),
+                            text_button("+ Chromatic", |st: &mut StudioState| {
+                                let _ = st.insert_catalog_item("shader-chromatic");
+                            })
+                            .into_any_flex(),
+                            text_button("+ Scanlines", |st: &mut StudioState| {
+                                let _ = st.insert_catalog_item("shader-scanlines");
+                            })
+                            .into_any_flex(),
+                        ])
+                        .into_any_flex(),
+                    );
                     sections.push(
                         flex_col(fx_rows)
                             .padding(8.0)
                             .background_color(pal.bg_inset)
-                            .border(pal.border_hairline, 1.0),
+                            .border(pal.border_hairline, 1.0)
+                            .into_any_flex(),
                     );
                 }
 
                 // 6. Pinned PropertyPanelFlatFooter (Ask AI Agent + Auto-KF Recording Toggle)
                 sections.push(
-                    flex_row((
+                    flex_row(vec![
                         sized_box(text_button(
                             format!("✦ Ask AI Agent about {nid}"),
                             |st: &mut StudioState| {
@@ -1326,8 +1594,9 @@ fn right_dock_view(
                         ))
                         .background_color(pal.accent_mint_wash)
                         .border(pal.accent_mint, 1.0)
-                        .corner_radius(6.0),
-                        FlexSpacer::Flex(1.0),
+                        .corner_radius(6.0)
+                        .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
                         text_button(
                             if state.auto_keyframe {
                                 "● Auto-KF: REC"
@@ -1337,13 +1606,15 @@ fn right_dock_view(
                             |st: &mut StudioState| {
                                 st.auto_keyframe = !st.auto_keyframe;
                             },
-                        ),
-                    ))
+                        )
+                        .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
                     .padding(8.0)
                     .background_color(pal.bg_raised)
                     .border(pal.border_strong, 1.0)
-                    .corner_radius(8.0),
+                    .corner_radius(8.0)
+                    .into_any_flex(),
                 );
             }
         }
@@ -1354,23 +1625,27 @@ fn right_dock_view(
                 let vis_icon = if row.visible { "👁" } else { "🚫" };
                 let title = format!("{indent}{vis_icon} {}", row.label);
                 sections.push(
-                    flex_row((
-                        kind_badge_chip(row.badge, pal),
+                    flex_row(vec![
+                        kind_badge_chip(row.badge, pal).into_any_flex(),
                         text_button(title, move |st: &mut StudioState| {
                             st.selected_node = Some(nid);
                             let _ = st.render_current_frame();
-                        }),
-                        FlexSpacer::Flex(1.0),
+                        })
+                        .into_any_flex(),
+                        FlexSpacer::Flex(1.0).into_any_flex(),
                         text_button("Vis", move |st: &mut StudioState| {
                             let _ = st.layer_toggle_visibility(nid);
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("↑", move |st: &mut StudioState| {
                             let _ = st.layer_move_z_order(nid, -1);
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("↓", move |st: &mut StudioState| {
                             let _ = st.layer_move_z_order(nid, 1);
-                        }),
-                    ))
+                        })
+                        .into_any_flex(),
+                    ])
                     .cross_axis_alignment(CrossAxisAlignment::Center)
                     .padding(6.0)
                     .background_color(if row.selected {
@@ -1386,7 +1661,8 @@ fn right_dock_view(
                         },
                         1.0,
                     )
-                    .corner_radius(6.0),
+                    .corner_radius(6.0)
+                    .into_any_flex(),
                 );
             }
         }
@@ -1394,78 +1670,91 @@ fn right_dock_view(
             let sel_id = state.selected_node.unwrap_or(NodeId(0));
             let draft = state.chat.input_draft.clone();
             sections.push(
-                flex_col((
+                flex_col(vec![
                     label(format!(
                         "✦ WebMCP Agent Studio · Target {sel_id} · {}",
                         state.chat.provider_model
                     ))
                     .weight(FontWeight::BOLD)
                     .text_size(12.0)
-                    .color(pal.accent_mint),
+                    .color(pal.accent_mint)
+                    .into_any_flex(),
                     checkbox(
                         "Attach selected node context",
                         state.chat.attach_selected_node,
                         |st: &mut StudioState, v: bool| {
                             st.chat.attach_selected_node = v;
                         },
-                    ),
+                    )
+                    .into_any_flex(),
                     text_input(draft, |st: &mut StudioState, next: String| {
                         st.chat.input_draft = next;
-                    }),
-                    flex_row((
+                    })
+                    .into_any_flex(),
+                    flex_row(vec![
                         sized_box(text_button("▶ Send to Agent", |st: &mut StudioState| {
                             let _ = st.submit_current_chat_draft();
                         }))
                         .background_color(pal.accent_mint_wash)
                         .border(pal.accent_mint, 1.0)
-                        .corner_radius(6.0),
+                        .corner_radius(6.0)
+                        .into_any_flex(),
                         text_button("📋 Prompt v1", |st: &mut StudioState| {
                             let _ = st.generate_selected_element_prompt("");
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("/look", |st: &mut StudioState| {
                             let _ = st.submit_chat_prompt("/look");
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("+ Film Grain", |st: &mut StudioState| {
                             let _ = st.submit_chat_prompt("add film grain");
-                        }),
-                    )),
-                ))
+                        })
+                        .into_any_flex(),
+                    ])
+                    .into_any_flex(),
+                ])
                 .padding(8.0)
                 .background_color(pal.bg_raised)
                 .border(pal.border_strong, 1.0)
-                .corner_radius(8.0),
+                .corner_radius(8.0)
+                .into_any_flex(),
             );
 
             if let Some(prompt_v1) = &state.last_copied_agent_prompt {
                 sections.push(
-                    flex_col((
+                    flex_col(vec![
                         label("Kine Studio Element Edit Request v1:")
                             .weight(FontWeight::BOLD)
                             .text_size(11.0)
-                            .color(pal.accent_mint),
-                        prose(prompt_v1.clone()),
-                    ))
+                            .color(pal.accent_mint)
+                            .into_any_flex(),
+                        prose(prompt_v1.clone()).into_any_flex(),
+                    ])
                     .padding(8.0)
                     .background_color(pal.bg_inset)
                     .border(pal.accent_mint, 1.0)
-                    .corner_radius(8.0),
+                    .corner_radius(8.0)
+                    .into_any_flex(),
                 );
             }
 
             for msg in &state.chat.messages {
                 let header = format!("[{}]", msg.role.badge());
                 sections.push(
-                    flex_col((
+                    flex_col(vec![
                         label(header)
                             .weight(FontWeight::BOLD)
                             .text_size(11.0)
-                            .color(pal.accent_cyan),
-                        prose(msg.content.clone()),
-                    ))
+                            .color(pal.accent_cyan)
+                            .into_any_flex(),
+                        prose(msg.content.clone()).into_any_flex(),
+                    ])
                     .padding(7.0)
                     .background_color(pal.bg_surface)
                     .border(pal.border_hairline, 1.0)
-                    .corner_radius(6.0),
+                    .corner_radius(6.0)
+                    .into_any_flex(),
                 );
             }
         }
@@ -1473,36 +1762,44 @@ fn right_dock_view(
             let out_path = state.export_output_path.clone();
             let cur_fmt = state.export_format.clone();
             sections.push(
-                flex_col((
+                flex_col(vec![
                     label(format!("Render Queue · Format: {}", cur_fmt.to_uppercase()))
                         .weight(FontWeight::BOLD)
                         .text_size(12.0)
-                        .color(pal.text_primary),
-                    flex_row((
+                        .color(pal.text_primary)
+                        .into_any_flex(),
+                    flex_row(vec![
                         text_button("MP4", |st: &mut StudioState| {
                             st.export_format = "mp4".to_string();
                             st.export_output_path = "studio-render.mp4".to_string();
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("MKV", |st: &mut StudioState| {
                             st.export_format = "mkv".to_string();
                             st.export_output_path = "studio-render.mkv".to_string();
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("WebM", |st: &mut StudioState| {
                             st.export_format = "webm".to_string();
                             st.export_output_path = "studio-render.webm".to_string();
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("GIF", |st: &mut StudioState| {
                             st.export_format = "gif".to_string();
                             st.export_output_path = "studio-render.gif".to_string();
-                        }),
+                        })
+                        .into_any_flex(),
                         text_button("PNG", |st: &mut StudioState| {
                             st.export_format = "png".to_string();
                             st.export_output_path = "studio-frame.png".to_string();
-                        }),
-                    )),
+                        })
+                        .into_any_flex(),
+                    ])
+                    .into_any_flex(),
                     text_input(out_path, |st: &mut StudioState, next: String| {
                         st.export_output_path = next;
-                    }),
+                    })
+                    .into_any_flex(),
                     sized_box(text_button(
                         "▶ Start In-Process Render",
                         |st: &mut StudioState| {
@@ -1511,12 +1808,14 @@ fn right_dock_view(
                     ))
                     .background_color(pal.accent_mint_wash)
                     .border(pal.accent_mint, 1.0)
-                    .corner_radius(6.0),
-                ))
+                    .corner_radius(6.0)
+                    .into_any_flex(),
+                ])
                 .padding(8.0)
                 .background_color(pal.bg_raised)
                 .border(pal.border_strong, 1.0)
-                .corner_radius(8.0),
+                .corner_radius(8.0)
+                .into_any_flex(),
             );
 
             for job in state.render_queue.iter().rev() {
@@ -1525,7 +1824,7 @@ fn right_dock_view(
                     RenderJobStatus::Failed(err) => format!("FAILED: {err}"),
                 };
                 sections.push(
-                    flex_col((
+                    flex_col(vec![
                         label(format!(
                             "#{} [{}] {} ({} frames @ {}fps)",
                             job.id,
@@ -1536,7 +1835,8 @@ fn right_dock_view(
                         ))
                         .weight(FontWeight::BOLD)
                         .text_size(12.0)
-                        .color(pal.text_primary),
+                        .color(pal.text_primary)
+                        .into_any_flex(),
                         label(format!(
                             "{} · {} bytes -> {}",
                             status_str,
@@ -1544,17 +1844,22 @@ fn right_dock_view(
                             job.output_path.display()
                         ))
                         .text_size(11.0)
-                        .color(pal.accent_mint),
-                    ))
+                        .color(pal.accent_mint)
+                        .into_any_flex(),
+                    ])
                     .padding(7.0)
                     .background_color(pal.bg_surface)
                     .border(pal.border_hairline, 1.0)
-                    .corner_radius(6.0),
+                    .corner_radius(6.0)
+                    .into_any_flex(),
                 );
             }
         }
     }
 
-    flex_col((tab_strip, portal(flex_col(sections).padding(8.0)).flex(1.0)))
-        .background_color(pal.bg_surface)
+    flex_col(vec![
+        tab_strip.into_any_flex(),
+        flex_col(sections).padding(8.0).flex(1.0).into_any_flex(),
+    ])
+    .background_color(pal.bg_surface)
 }

@@ -7,7 +7,7 @@ use crate::catalog::{
     CompositionEntry,
 };
 use crate::chat::StudioChatSession;
-use kine_core::{NodeId, NodeKind, Rect, Scene};
+use kine_core::{NodeId, Rect, Scene};
 use kine_platform::{resolve_output, write_output, PlatformInfo};
 use kine_render::{FrameFormat, RasterPixmap, RenderBackend};
 use kine_script::{AudioDef, AudioTrackDef, NodeDef, SceneDef};
@@ -198,8 +198,8 @@ impl StudioState {
             .map(|c| c.scene_def.clone())
             .unwrap_or_else(starter_kinetic_scene);
 
-        let initial_scene =
-            kine_script::scene_from_def(initial_def.clone()).unwrap_or_else(|_| Scene::new(640, 360));
+        let initial_scene = kine_script::scene_from_def(initial_def.clone())
+            .unwrap_or_else(|_| Scene::new(640, 360));
         let scene_handle = engine.insert_scene(initial_scene);
         let source_buffer =
             serde_json::to_string_pretty(&initial_def).unwrap_or_else(|_| "{}".to_string());
@@ -462,7 +462,11 @@ impl StudioState {
     /// Format `self.current_time` as either `Frame F / Total` or `MM:SS.ms`.
     pub fn formatted_timecode(&self) -> String {
         if self.show_frames {
-            format!("F {:03} / {:03}", self.current_frame_index(), self.total_frames())
+            format!(
+                "F {:03} / {:03}",
+                self.current_frame_index(),
+                self.total_frames()
+            )
         } else {
             let total_secs = self.current_time.max(0.0);
             let mins = (total_secs / 60.0).floor() as u32;
@@ -543,7 +547,12 @@ impl StudioState {
         let mut out = Vec::new();
         let mut next_id = 1u64;
         out.push((NodeId(0), Vec::new()));
-        collect_node_paths(&self.scene_def.root, &mut Vec::new(), &mut next_id, &mut out);
+        collect_node_paths(
+            &self.scene_def.root,
+            &mut Vec::new(),
+            &mut next_id,
+            &mut out,
+        );
         out
     }
 
@@ -587,7 +596,11 @@ impl StudioState {
 
     /// Apply a mutation to `self.scene_def` with automatic undo checkpointing and in-process engine sync.
     /// If the mutated `SceneDef` fails validation, the previous `SceneDef` is restored atomically.
-    pub fn commit_mutation<F>(&mut self, undo_label: impl Into<String>, mutate: F) -> Result<(), StudioError>
+    pub fn commit_mutation<F>(
+        &mut self,
+        undo_label: impl Into<String>,
+        mutate: F,
+    ) -> Result<(), StudioError>
     where
         F: FnOnce(&mut SceneDef) -> Result<(), StudioError>,
     {
@@ -737,7 +750,11 @@ impl StudioState {
     // ── Frame Capture & Render Queue Export ────────────────────────────────
 
     /// Capture the current playhead frame to disk (`PNG` or `SVG`).
-    pub fn capture_current_frame(&mut self, format: FrameFormat, out_path: &Path) -> Result<PathBuf, StudioError> {
+    pub fn capture_current_frame(
+        &mut self,
+        format: FrameFormat,
+        out_path: &Path,
+    ) -> Result<PathBuf, StudioError> {
         let host = PlatformInfo::detect();
         let resolved = resolve_output(out_path, &host);
         let frame_idx = u64::from(self.current_frame_index());
@@ -801,7 +818,9 @@ impl StudioState {
         }
 
         let Some(container) = VideoContainer::from_extension(&fmt) else {
-            return Err(StudioError::Message(format!("unsupported export format: {fmt}")));
+            return Err(StudioError::Message(format!(
+                "unsupported export format: {fmt}"
+            )));
         };
         let mut opts = VideoOptions::default();
         opts.frames = u64::from(frames);
@@ -897,7 +916,10 @@ fn node_at_path<'a>(root: &'a NodeDef, path: &[usize]) -> Option<&'a NodeDef> {
     Some(cur)
 }
 
-pub(crate) fn node_at_path_mut<'a>(root: &'a mut NodeDef, path: &[usize]) -> Option<&'a mut NodeDef> {
+pub(crate) fn node_at_path_mut<'a>(
+    root: &'a mut NodeDef,
+    path: &[usize],
+) -> Option<&'a mut NodeDef> {
     let mut cur = root;
     for &idx in path {
         cur = cur.children.as_mut()?.get_mut(idx)?;
@@ -906,9 +928,7 @@ pub(crate) fn node_at_path_mut<'a>(root: &'a mut NodeDef, path: &[usize]) -> Opt
 }
 
 #[cfg(feature = "xilem-ui")]
-pub fn pixmap_to_xilem_image(
-    pixmap: &RasterPixmap,
-) -> xilem::masonry::peniko::ImageData {
+pub fn pixmap_to_xilem_image(pixmap: &RasterPixmap) -> xilem::masonry::peniko::ImageData {
     use std::sync::Arc;
     use xilem::masonry::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
     let w = u32::from(pixmap.width());
@@ -992,10 +1012,14 @@ fn draw_corner_handles(pixmap: &mut RasterPixmap, rect: Rect, rgba: [u8; 4]) {
         (x1, ym),
     ];
     for (cx, cy) in handles {
-        for dy in -3..=3 {
-            for dx in -3..=3 {
+        for dy in -3i32..=3 {
+            for dx in -3i32..=3 {
                 let is_border = dx.abs() == 3 || dy.abs() == 3;
-                let fill = if is_border { rgba } else { [255, 255, 255, 255] };
+                let fill = if is_border {
+                    rgba
+                } else {
+                    [255, 255, 255, 255]
+                };
                 blend_pixel(pixmap, cx + dx, cy + dy, fill);
             }
         }
