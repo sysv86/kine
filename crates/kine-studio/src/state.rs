@@ -506,10 +506,14 @@ impl StudioState {
                     .and_then(|d| d.kind.as_deref())
                     .is_some_and(|k| k.eq_ignore_ascii_case("text"));
                 if is_text {
-                    self.mutate_node(target, format!("Set font family to {font_name}"), move |d| {
-                        d.font_family = Some(font_name);
-                        Ok(())
-                    })?;
+                    self.mutate_node(
+                        target,
+                        format!("Set font family to {font_name}"),
+                        move |d| {
+                            d.font_family = Some(font_name);
+                            Ok(())
+                        },
+                    )?;
                     self.notify_status(format!("Applied font {} to {target}", asset.name));
                 } else {
                     let _ = self.insert_catalog_item("text-headline")?;
@@ -613,7 +617,10 @@ impl StudioState {
         let entry = CompositionEntry {
             id: format!("comp-{idx:02}"),
             title: format!("{idx:02} // Studio Composition"),
-            subtitle: format!("{w}x{h} · {:.0}fps · Custom scene", self.settings.default_fps),
+            subtitle: format!(
+                "{w}x{h} · {:.0}fps · Custom scene",
+                self.settings.default_fps
+            ),
             source_path: None,
             scene_def: def,
         };
@@ -1364,7 +1371,7 @@ impl StudioState {
         opts.fps_den = 1;
         opts.container = container;
         opts.encoder = VideoEncoder::Av1Software;
-        opts.quantizer = self.settings.export_quantizer;
+        opts.quantizer = self.settings.export_quantizer as usize;
         opts.speed = self.settings.export_speed;
 
         match render_video(&mut self.engine, self.scene_handle, &opts) {

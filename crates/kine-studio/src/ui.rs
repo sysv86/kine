@@ -21,13 +21,12 @@ use crate::preview_canvas::preview;
 use crate::settings_panel::settings_window_overlay;
 use crate::state::{LeftDockTab, RenderJobStatus, RightDockTab, StudioState};
 use crate::theme::{
-    sample_audio_meter_levels, DensityMetrics, StudioAnimState, StudioPalette, ICON_FONT,
-    MONO_FONT, RULER_H, UI_FONT,
+    sample_audio_meter_levels, DensityMetrics, StudioPalette, ICON_FONT, MONO_FONT, RULER_H,
+    UI_FONT,
 };
 use crate::timeline::{generate_ruler_ticks, TimelineTrackKind};
 use kine_core::NodeId;
 use kine_render::{FrameFormat, RenderBackend};
-use std::f64::consts::FRAC_PI_2;
 use std::path::Path;
 use std::time::Duration;
 
@@ -40,11 +39,11 @@ use xilem::{
     },
     style::Style as _,
     view::{
-        button, flex_col, flex_row, label, sized_box, slider, text_input, transformed, zstack,
-        AnyFlexChild, Axis, CrossAxisAlignment, FlexExt as _, FlexSpacer,
+        button, flex_col, flex_row, label, sized_box, slider, text_input, zstack, AnyFlexChild,
+        Axis, CrossAxisAlignment, FlexExt as _, FlexSpacer,
     },
     winit::error::EventLoopError,
-    Affine, Color, EventLoop, WidgetView, WindowOptions, Xilem,
+    Color, EventLoop, WidgetView, WindowOptions, Xilem,
 };
 
 type Child = AnyFlexChild<StudioState>;
@@ -691,12 +690,7 @@ fn status_bar(state: &StudioState, t: &StudioPalette) -> impl WidgetView<StudioS
             divider(&t).into_any_flex(),
             txt(banner, 9.5, t.text_soft).into_any_flex(),
             FlexSpacer::Flex(1.0).into_any_flex(),
-            mono(
-                format!("Undo:{undo_depth} Redo:{redo_depth}"),
-                8.5,
-                t.muted,
-            )
-            .into_any_flex(),
+            mono(format!("Undo:{undo_depth} Redo:{redo_depth}"), 8.5, t.muted).into_any_flex(),
             divider(&t).into_any_flex(),
             mono(
                 format!(
@@ -711,7 +705,11 @@ fn status_bar(state: &StudioState, t: &StudioPalette) -> impl WidgetView<StudioS
             mono(
                 format!("{} · {:.1}ms", backend, state.last_render_ms),
                 9.0,
-                if gpu_active { t.accent_ink } else { t.text_soft },
+                if gpu_active {
+                    t.accent_ink
+                } else {
+                    t.text_soft
+                },
             )
             .into_any_flex(),
         ])
@@ -754,13 +752,9 @@ fn left_dock(
                 st.left_tab = LeftDockTab::Code
             })
             .into_any_flex(),
-            tab(
-                "widgets",
-                "Catalog",
-                cur == LeftDockTab::Catalog,
-                t,
-                |st| st.left_tab = LeftDockTab::Catalog,
-            )
+            tab("widgets", "Catalog", cur == LeftDockTab::Catalog, t, |st| {
+                st.left_tab = LeftDockTab::Catalog
+            })
             .into_any_flex(),
         ],
         t,
@@ -786,11 +780,7 @@ fn left_dock(
     .corner_radius(dm.panel_radius)
 }
 
-fn composition_list(
-    state: &mut StudioState,
-    t: &StudioPalette,
-    dm: &DensityMetrics,
-) -> Boxed {
+fn composition_list(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics) -> Boxed {
     let mut rows: Vec<Child> = Vec::new();
     rows.push(
         flex_row((
@@ -927,14 +917,9 @@ fn asset_list(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics) -
         .collect();
     if !modules.is_empty() {
         rows.push(
-            sized_box(txtw(
-                "PROJECT MODULES",
-                8.5,
-                FontWeight::SEMI_BOLD,
-                t.muted,
-            ))
-            .padding(Padding::from_vh(6.0, 2.0))
-            .into_any_flex(),
+            sized_box(txtw("PROJECT MODULES", 8.5, FontWeight::SEMI_BOLD, t.muted))
+                .padding(Padding::from_vh(6.0, 2.0))
+                .into_any_flex(),
         );
         for (name, kind, description) in modules {
             let module_name = name.clone();
@@ -1021,7 +1006,14 @@ fn code_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics) -
 
 fn catalog_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics) -> Boxed {
     let active_cat = state.catalog_category_filter.clone();
-    let categories = ["All", "Primitives", "Typography", "Media", "WGSL Shaders", "Audio DSP"];
+    let categories = [
+        "All",
+        "Primitives",
+        "Typography",
+        "Media",
+        "WGSL Shaders",
+        "Audio DSP",
+    ];
 
     let mut filter_chips: Vec<Child> = Vec::new();
     for &cat in &categories {
@@ -1273,9 +1265,14 @@ fn transport_bar(state: &mut StudioState, t: &StudioPalette) -> impl WidgetView<
             st.step_frames(-1);
         })
         .into_any_flex(),
-        sized_box(icon_btn(play_icon, t.on_accent, t, |st: &mut StudioState| {
-            st.is_playing = !st.is_playing;
-        }))
+        sized_box(icon_btn(
+            play_icon,
+            t.on_accent,
+            t,
+            |st: &mut StudioState| {
+                st.is_playing = !st.is_playing;
+            },
+        ))
         .background_color(t.accent)
         .border(t.accent_hover, 1.0)
         .corner_radius(6.0)
@@ -1429,12 +1426,7 @@ fn timeline_pane(
         })
         .into_any_flex(),
         FlexSpacer::Flex(1.0).into_any_flex(),
-        mono(
-            format!("{:.0}px/s", state.timeline_zoom_pps),
-            8.5,
-            t.muted,
-        )
-        .into_any_flex(),
+        mono(format!("{:.0}px/s", state.timeline_zoom_pps), 8.5, t.muted).into_any_flex(),
         icon_btn("fit_screen", t.text_soft, t, |st| {
             st.timeline_zoom_pps = 140.0;
         })
@@ -1638,11 +1630,7 @@ fn timeline_tracks(
                     show_waveform: false,
                     bg_lane: t.bg_inset,
                     grid_line: t.border,
-                    clip_fill: if selected {
-                        t.accent_wash
-                    } else {
-                        t.bg_raised
-                    },
+                    clip_fill: if selected { t.accent_wash } else { t.bg_raised },
                     clip_band: t.accent,
                     clip_border: if selected { t.border_accent } else { t.border },
                     kf_color: t.accent,
@@ -1810,15 +1798,15 @@ fn vello_node_track_row(
     }
 
     if has_children {
-        let chevron_angle = if collapsed { 0.0 } else { FRAC_PI_2 };
+        let chevron = if collapsed {
+            "chevron_right"
+        } else {
+            "expand_more"
+        };
         gutter_items.push(
-            button(
-                transformed(icon("chevron_right", 13.0, t.muted))
-                    .transform(Affine::rotate(chevron_angle)),
-                move |st: &mut StudioState| {
-                    st.toggle_node_collapsed(nid);
-                },
-            )
+            button(icon(chevron, 13.0, t.muted), move |st: &mut StudioState| {
+                st.toggle_node_collapsed(nid);
+            })
             .padding(Padding::all(2.0))
             .background_color(transparent())
             .border(transparent(), 1.0)
@@ -2094,9 +2082,12 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
             flex_row((
                 txt("Cascading Sections", 8.5, t.muted),
                 FlexSpacer::Flex(1.0),
-                button(txt("Expand All", 8.5, t.accent_ink), |st: &mut StudioState| {
-                    st.set_all_inspector_sections(true);
-                })
+                button(
+                    txt("Expand All", 8.5, t.accent_ink),
+                    |st: &mut StudioState| {
+                        st.set_all_inspector_sections(true);
+                    },
+                )
                 .padding(Padding::from_vh(1.0, 5.0))
                 .corner_radius(3.0)
                 .background_color(t.bg_inset)
@@ -2254,10 +2245,7 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         section_header(
             "transform",
             "2D Transform",
-            format!(
-                "{:.0}° · {:.2}×",
-                snap.rotation_deg, snap.scale_x
-            ),
+            format!("{:.0}° · {:.2}×", snap.rotation_deg, snap.scale_x),
             transform_open,
             t,
         )
@@ -2398,22 +2386,20 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
                 ))
                 .gap(4.0_f64.px())
                 .into_any_flex(),
-                flex_row(vec![
-                    interactive_num_cell(
-                        "RADIUS",
-                        format!("{:.0}px", snap.corner_radius),
-                        is_anim("cornerRadius"),
-                        t,
-                        |st| {
-                            let _ = st.inspector_nudge_corner_radius(-4.0);
-                        },
-                        |st| {
-                            let _ = st.inspector_nudge_corner_radius(4.0);
-                        },
-                    )
-                    .flex(1.0)
-                    .into_any_flex(),
-                ])
+                flex_row(vec![interactive_num_cell(
+                    "RADIUS",
+                    format!("{:.0}px", snap.corner_radius),
+                    is_anim("cornerRadius"),
+                    t,
+                    |st| {
+                        let _ = st.inspector_nudge_corner_radius(-4.0);
+                    },
+                    |st| {
+                        let _ = st.inspector_nudge_corner_radius(4.0);
+                    },
+                )
+                .flex(1.0)
+                .into_any_flex()])
                 .into_any_flex(),
             ])
             .gap(4.5_f64.px())
@@ -2430,10 +2416,7 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         section_header(
             "stroke",
             "Stroke & Drop Shadow",
-            format!(
-                "{:.0}px · blur {:.0}",
-                snap.stroke_width, snap.shadow_blur
-            ),
+            format!("{:.0}px · blur {:.0}", snap.stroke_width, snap.shadow_blur),
             stroke_open,
             t,
         )
@@ -2441,40 +2424,38 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
     );
     if stroke_open {
         kids.push(
-            flex_col(vec![
-                flex_row(vec![
-                    interactive_num_cell(
-                        "STROKE",
-                        format!("{:.0}px", snap.stroke_width),
-                        false,
-                        t,
-                        |st| {
-                            let _ = st.inspector_set_stroke(None, Some(-1.0));
-                        },
-                        |st| {
-                            let _ = st.inspector_set_stroke(None, Some(1.0));
-                        },
-                    )
-                    .flex(1.0)
-                    .into_any_flex(),
-                    interactive_num_cell(
-                        "SHADOW",
-                        format!("{:.0}px", snap.shadow_blur),
-                        false,
-                        t,
-                        |st| {
-                            let _ = st.inspector_nudge_shadow_blur(-4.0);
-                        },
-                        |st| {
-                            let _ = st.inspector_nudge_shadow_blur(4.0);
-                        },
-                    )
-                    .flex(1.0)
-                    .into_any_flex(),
-                ])
-                .gap(4.0_f64.px())
+            flex_col(vec![flex_row(vec![
+                interactive_num_cell(
+                    "STROKE",
+                    format!("{:.0}px", snap.stroke_width),
+                    false,
+                    t,
+                    |st| {
+                        let _ = st.inspector_set_stroke(None, Some(-1.0));
+                    },
+                    |st| {
+                        let _ = st.inspector_set_stroke(None, Some(1.0));
+                    },
+                )
+                .flex(1.0)
+                .into_any_flex(),
+                interactive_num_cell(
+                    "SHADOW",
+                    format!("{:.0}px", snap.shadow_blur),
+                    false,
+                    t,
+                    |st| {
+                        let _ = st.inspector_nudge_shadow_blur(-4.0);
+                    },
+                    |st| {
+                        let _ = st.inspector_nudge_shadow_blur(4.0);
+                    },
+                )
+                .flex(1.0)
                 .into_any_flex(),
             ])
+            .gap(4.0_f64.px())
+            .into_any_flex()])
             .gap(4.0_f64.px())
             .padding(Padding::all(dm.panel_pad))
             .background_color(t.bg_inset)
@@ -2646,7 +2627,10 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
                             mono("◆", 9.0, t.accent),
                             txtw(prop_name.clone(), 9.5, FontWeight::MEDIUM, t.text),
                             mono(
-                                format!("{:.2}s..{:.2}s · {kf_n}kf · {ease_lbl}", spec.start, spec.end),
+                                format!(
+                                    "{:.2}s..{:.2}s · {kf_n}kf · {ease_lbl}",
+                                    spec.start, spec.end
+                                ),
                                 8.5,
                                 t.muted,
                             ),
@@ -2761,10 +2745,15 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
     // Bottom Ask AI Agent bar
     kids.push(
         flex_row((
-            primary_btn("smart_toy", "Ask AI on Node", t, move |st: &mut StudioState| {
-                let _ = st.generate_selected_element_prompt("");
-                st.ask_agent_modal_open = true;
-            }),
+            primary_btn(
+                "smart_toy",
+                "Ask AI on Node",
+                t,
+                move |st: &mut StudioState| {
+                    let _ = st.generate_selected_element_prompt("");
+                    st.ask_agent_modal_open = true;
+                },
+            ),
             FlexSpacer::Flex(1.0),
             icon_text_btn("tune", "UI Settings", t, |st: &mut StudioState| {
                 st.settings_open = true;
@@ -2793,9 +2782,12 @@ fn layers_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         flex_row((
             txtw("SCENE HIERARCHY", 8.5, FontWeight::SEMI_BOLD, t.muted),
             FlexSpacer::Flex(1.0),
-            button(txt("Expand All", 8.5, t.accent_ink), |st: &mut StudioState| {
-                st.collapsed_nodes.clear();
-            })
+            button(
+                txt("Expand All", 8.5, t.accent_ink),
+                |st: &mut StudioState| {
+                    st.collapsed_nodes.clear();
+                },
+            )
             .padding(Padding::from_vh(1.5, 5.0))
             .corner_radius(3.0)
             .background_color(t.bg_inset)
@@ -2828,15 +2820,15 @@ fn layers_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         }
 
         if row.has_children {
-            let angle = if row.collapsed { 0.0 } else { FRAC_PI_2 };
+            let chevron = if row.collapsed {
+                "chevron_right"
+            } else {
+                "expand_more"
+            };
             line_items.push(
-                button(
-                    transformed(icon("chevron_right", 13.0, t.muted))
-                        .transform(Affine::rotate(angle)),
-                    move |st: &mut StudioState| {
-                        st.toggle_node_collapsed(nid);
-                    },
-                )
+                button(icon(chevron, 13.0, t.muted), move |st: &mut StudioState| {
+                    st.toggle_node_collapsed(nid);
+                })
                 .padding(Padding::all(2.0))
                 .background_color(transparent())
                 .border(transparent(), 1.0)
@@ -3099,7 +3091,12 @@ fn renders_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics
             flex_col((
                 flex_row((
                     mono(format!("#{}", job.id), 9.0, t.accent_ink),
-                    txtw(job.composition_title.clone(), 9.5, FontWeight::MEDIUM, t.text),
+                    txtw(
+                        job.composition_title.clone(),
+                        9.5,
+                        FontWeight::MEDIUM,
+                        t.text,
+                    ),
                     FlexSpacer::Flex(1.0),
                     mono(job.format.to_uppercase(), 8.5, t.accent_ink),
                 ))
@@ -3137,16 +3134,12 @@ fn ask_agent_modal_overlay(
     t: &StudioPalette,
 ) -> impl WidgetView<StudioState> {
     let t = *t;
-    let progress = StudioAnimState::ease_out_quint(state.anim.agent_modal_t.max(0.85));
-    let scale = 0.96 + 0.04 * f64::from(progress);
     let draft = state.ask_agent_draft.clone();
-    let prompt_preview = state
-        .last_copied_agent_prompt
-        .clone()
-        .unwrap_or_else(|| "Select a node and type an instruction to synthesize an edit.".to_string());
+    let prompt_preview = state.last_copied_agent_prompt.clone().unwrap_or_else(|| {
+        "Select a node and type an instruction to synthesize an edit.".to_string()
+    });
 
-    let card = transformed(
-        sized_box(
+    let card = sized_box(
             flex_col(vec![
                 flex_row((
                     icon("smart_toy", 15.0, t.accent),
@@ -3218,9 +3211,7 @@ fn ask_agent_modal_overlay(
         .height(380.0_f64.px())
         .background_color(t.bg_surface)
         .border(t.border_accent, 1.5)
-        .corner_radius(10.0),
-    )
-    .transform(Affine::scale(scale));
+        .corner_radius(10.0);
 
     sized_box(
         flex_col(vec![
@@ -3264,11 +3255,13 @@ fn section_header(
     t: &StudioPalette,
 ) -> impl WidgetView<StudioState> {
     let t = *t;
-    let angle = if open { FRAC_PI_2 } else { 0.0 };
     button(
         flex_row((
-            transformed(icon("chevron_right", 13.5, if open { t.accent } else { t.muted }))
-                .transform(Affine::rotate(angle)),
+            icon(
+                if open { "expand_more" } else { "chevron_right" },
+                13.5,
+                if open { t.accent } else { t.muted },
+            ),
             txtw(title, 10.5, FontWeight::SEMI_BOLD, t.text),
             FlexSpacer::Flex(1.0),
             mono(summary, 8.5, if open { t.accent_ink } else { t.muted }),

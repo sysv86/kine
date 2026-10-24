@@ -19,7 +19,7 @@
 use crate::local_portal::portal;
 use crate::state::StudioState;
 use crate::theme::{
-    AccentPreset, SettingsCategory, StudioAnimState, StudioPalette, StudioThemeMode, UiDensity,
+    AccentPreset, SettingsCategory, StudioPalette, StudioThemeMode, UiDensity,
     ViewportChannelMode, ICON_FONT, MONO_FONT, UI_FONT,
 };
 use kine_render::RenderBackend;
@@ -30,10 +30,10 @@ use xilem::{
     },
     style::Style as _,
     view::{
-        button, flex_col, flex_row, label, sized_box, slider, transformed, AnyFlexChild,
-        CrossAxisAlignment, FlexExt as _, FlexSpacer,
+        button, flex_col, flex_row, label, sized_box, slider, AnyFlexChild, CrossAxisAlignment,
+        FlexExt as _, FlexSpacer,
     },
-    Affine, Color, WidgetView,
+    Color, WidgetView,
 };
 
 type Child = AnyFlexChild<StudioState>;
@@ -74,8 +74,6 @@ pub fn settings_window_overlay(
     t: &StudioPalette,
 ) -> impl WidgetView<StudioState> {
     let t = *t;
-    let progress = StudioAnimState::ease_out_quint(state.anim.settings_modal_t.max(0.85));
-    let scale = 0.96 + 0.04 * f64::from(progress);
     let active_cat = state.settings_category;
 
     // Left category sidebar inside settings modal
@@ -96,11 +94,7 @@ pub fn settings_window_overlay(
         nav_items.push(
             button(
                 flex_row((
-                    s_icon(
-                        cat.icon(),
-                        14.0,
-                        if is_active { t.accent } else { t.muted },
-                    ),
+                    s_icon(cat.icon(), 14.0, if is_active { t.accent } else { t.muted }),
                     s_txtw(
                         cat.label(),
                         10.5,
@@ -254,30 +248,27 @@ pub fn settings_window_overlay(
     .background_color(t.bg_raised)
     .border(t.border, 1.0);
 
-    let dialog_card = transformed(
-        sized_box(
-            flex_col(vec![
-                modal_header.into_any_flex(),
-                flex_row(vec![
-                    sidebar.into_any_flex(),
-                    portal(pane_body).flex(1.0).into_any_flex(),
-                ])
-                .gap(0.0_f64.px())
-                .cross_axis_alignment(CrossAxisAlignment::Fill)
-                .must_fill_major_axis(true)
-                .flex(1.0)
-                .into_any_flex(),
+    let dialog_card = sized_box(
+        flex_col(vec![
+            modal_header.into_any_flex(),
+            flex_row(vec![
+                sidebar.into_any_flex(),
+                portal(pane_body).flex(1.0).into_any_flex(),
             ])
             .gap(0.0_f64.px())
-            .cross_axis_alignment(CrossAxisAlignment::Fill),
-        )
-        .width(740.0_f64.px())
-        .height(480.0_f64.px())
-        .background_color(t.bg_surface)
-        .border(t.border_strong, 1.5)
-        .corner_radius(12.0),
+            .cross_axis_alignment(CrossAxisAlignment::Fill)
+            .must_fill_major_axis(true)
+            .flex(1.0)
+            .into_any_flex(),
+        ])
+        .gap(0.0_f64.px())
+        .cross_axis_alignment(CrossAxisAlignment::Fill),
     )
-    .transform(Affine::scale(scale));
+    .width(740.0_f64.px())
+    .height(480.0_f64.px())
+    .background_color(t.bg_surface)
+    .border(t.border_strong, 1.5)
+    .corner_radius(12.0);
 
     sized_box(
         flex_col(vec![
