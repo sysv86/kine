@@ -6,7 +6,6 @@ use crate::catalog::{
     build_catalog_node, default_assets, default_compositions, starter_kinetic_scene, AssetEntry,
     AssetKind, CompositionEntry,
 };
-use crate::chat::StudioChatSession;
 use crate::theme::{
     SettingsCategory, StudioAnimState, StudioSettings, StudioThemeMode, ViewportChannelMode,
 };
@@ -48,7 +47,6 @@ impl LeftDockTab {
 pub enum RightDockTab {
     Design,
     Layers,
-    AiAgent,
     Renders,
 }
 
@@ -57,7 +55,6 @@ impl RightDockTab {
         match self {
             Self::Design => "Design",
             Self::Layers => "Layers",
-            Self::AiAgent => "AI Agent",
             Self::Renders => "Renders",
         }
     }
@@ -131,7 +128,6 @@ pub struct StudioState {
     pub left_tab: LeftDockTab,
     pub right_tab: RightDockTab,
     pub inspector_visible: bool,
-    pub ask_agent_modal_open: bool,
 
     // ── Settings Window & UI Animation State ───────────────────────────────
     pub settings: StudioSettings,
@@ -186,11 +182,6 @@ pub struct StudioState {
     /// Wall-clock time of the last preview rasterization, for the status bar.
     pub last_render_ms: f32,
     pub inspect_findings: Vec<Finding>,
-
-    // ── AI Agent Chat & Prompt Modal ───────────────────────────────────────
-    pub chat: StudioChatSession,
-    pub ask_agent_draft: String,
-    pub last_copied_agent_prompt: Option<String>,
 
     // ── Render Queue ───────────────────────────────────────────────────────
     pub export_format: String,
@@ -258,7 +249,6 @@ impl StudioState {
             left_tab: LeftDockTab::Compositions,
             right_tab: RightDockTab::Design,
             inspector_visible: true,
-            ask_agent_modal_open: false,
             settings,
             settings_open: false,
             settings_category: SettingsCategory::Appearance,
@@ -300,9 +290,6 @@ impl StudioState {
             frame_revision: 0,
             last_render_ms: 0.0,
             inspect_findings: Vec::new(),
-            chat: StudioChatSession::new(),
-            ask_agent_draft: String::new(),
-            last_copied_agent_prompt: None,
             export_format: "mp4".to_string(),
             export_output_path: "studio-render.mp4".to_string(),
             render_queue: Vec::new(),
@@ -417,7 +404,6 @@ impl StudioState {
             return false;
         }
         let target_settings = if self.settings_open { 1.0 } else { 0.0 };
-        let target_agent = if self.ask_agent_modal_open { 1.0 } else { 0.0 };
         let target_left = if self.settings.left_dock_visible {
             1.0
         } else {
@@ -427,7 +413,6 @@ impl StudioState {
 
         (self.anim.smooth_playhead - self.current_time).abs() > 1e-3
             || (self.anim.settings_modal_t - target_settings).abs() > 0.01
-            || (self.anim.agent_modal_t - target_agent).abs() > 0.01
             || (self.anim.left_dock_t - target_left).abs() > 0.01
             || (self.anim.right_dock_t - target_right).abs() > 0.01
             || self.anim.toast_timer > 0.01
@@ -442,7 +427,6 @@ impl StudioState {
             dt_real_seconds as f32,
             self.current_time,
             self.settings_open,
-            self.ask_agent_modal_open,
             self.settings.left_dock_visible,
             self.inspector_visible,
             &self.open_inspector_sections,

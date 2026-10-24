@@ -1,10 +1,9 @@
 //! `kine-studio` — Native Rust **Xilem** visual studio, NLE timeline, node
-//! inspector, settings dialog, and AI agent loop synchronized in-process with
+//! inspector, settings dialog, and real-time external CLI agent bridge synchronized in-process with
 //! the Kine engine across **Linux**, **Windows**, and **macOS**.
 
 pub mod agent_tools;
 pub mod catalog;
-pub mod chat;
 #[cfg(feature = "xilem-ui")]
 pub mod custom_widgets;
 pub mod inspector;
@@ -31,7 +30,6 @@ pub use catalog::{
     starter_nle_av_scene, starter_shader_scene, AssetEntry, AssetKind, CatalogItem,
     CompositionEntry, CATALOG_ITEMS,
 };
-pub use chat::{AgentChatMessage, AgentChatRole, StudioChatSession};
 pub use inspector::{LayerTreeRow, NodeInspectorSnapshot};
 pub use state::{
     LeftDockTab, RenderJobStatus, RenderQueueJob, RightDockTab, StudioError, StudioState, UndoEntry,
@@ -236,28 +234,6 @@ mod tests {
         let prompt = build_element_agent_prompt(&state, NodeId(2), "Add a subtle cyan glow");
         assert!(prompt.contains("Kine Studio element edit request v1"));
         assert!(prompt.contains("Add a subtle cyan glow"));
-    }
-
-    #[test]
-    fn chat_natural_language_and_json_tool_calls_mutate_scene() {
-        let mut state = StudioState::new(None);
-        state.selected_node = Some(NodeId(4));
-
-        let receipts = state.submit_chat_prompt("set text to AI DRIVEN KINE");
-        assert!(!receipts.is_empty());
-        assert_eq!(
-            state.node_def(NodeId(4)).and_then(|d| d.content.as_deref()),
-            Some("AI DRIVEN KINE")
-        );
-
-        let json_call = json!({
-            "tool": "studio_seek",
-            "args": { "time": 1.25 }
-        })
-        .to_string();
-        let seek_receipts = state.submit_chat_prompt(&json_call);
-        assert_eq!(seek_receipts.len(), 1);
-        assert!((state.current_time - 1.25).abs() < 1e-4);
     }
 
     #[test]

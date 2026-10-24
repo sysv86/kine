@@ -370,8 +370,6 @@ pub struct StudioAnimState {
     pub smooth_playhead: f64,
     /// Settings modal entrance progress `[0.0, 1.0]`.
     pub settings_modal_t: f32,
-    /// Ask Agent modal entrance progress `[0.0, 1.0]`.
-    pub agent_modal_t: f32,
     /// Left dock expansion progress `[0.0, 1.0]`.
     pub left_dock_t: f32,
     /// Right inspector dock expansion progress `[0.0, 1.0]`.
@@ -398,7 +396,6 @@ impl Default for StudioAnimState {
         Self {
             smooth_playhead: 0.5,
             settings_modal_t: 0.0,
-            agent_modal_t: 0.0,
             left_dock_t: 1.0,
             right_dock_t: 1.0,
             section_open_t: sections,
@@ -421,7 +418,6 @@ impl StudioAnimState {
         dt: f32,
         target_playhead: f64,
         settings_open: bool,
-        agent_modal_open: bool,
         left_visible: bool,
         right_visible: bool,
         open_sections: &std::collections::BTreeSet<String>,
@@ -431,7 +427,6 @@ impl StudioAnimState {
         if reduced_motion || speed_mult <= 0.05 {
             self.smooth_playhead = target_playhead;
             self.settings_modal_t = if settings_open { 1.0 } else { 0.0 };
-            self.agent_modal_t = if agent_modal_open { 1.0 } else { 0.0 };
             self.left_dock_t = if left_visible { 1.0 } else { 0.0 };
             self.right_dock_t = if right_visible { 1.0 } else { 0.0 };
             for (k, val) in &mut self.section_open_t {
@@ -464,7 +459,6 @@ impl StudioAnimState {
         };
 
         active |= step_towards(&mut self.settings_modal_t, if settings_open { 1.0 } else { 0.0 });
-        active |= step_towards(&mut self.agent_modal_t, if agent_modal_open { 1.0 } else { 0.0 });
         active |= step_towards(&mut self.left_dock_t, if left_visible { 1.0 } else { 0.0 });
         active |= step_towards(&mut self.right_dock_t, if right_visible { 1.0 } else { 0.0 });
 

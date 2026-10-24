@@ -9,7 +9,7 @@
 //!   replacing proportional spacer hacks.
 //! - Multi-open cascading Inspector accordion with animated disclosure chevrons and
 //!   3-state property rows (`Default`, `Modified`, `Keyframed`).
-//! - Full 5-tab Settings Window (`settings_panel.rs`) + Ask Agent Modal overlaid via `zstack`.
+//! - Full 5-tab Settings Window (`settings_panel.rs`) overlaid via `zstack`.
 
 use crate::catalog::CATALOG_ITEMS;
 use crate::custom_widgets::{
@@ -136,9 +136,6 @@ pub fn app_logic(state: &mut StudioState) -> impl WidgetView<StudioState> + use<
     // Layer modal overlays cleanly above the workspace using `zstack`
     let root_view: Boxed = if state.settings_open {
         let overlay = settings_window_overlay(state, &t);
-        zstack((base_shell, overlay)).boxed()
-    } else if state.ask_agent_modal_open {
-        let overlay = ask_agent_modal_overlay(state, &t);
         zstack((base_shell, overlay)).boxed()
     } else {
         base_shell.boxed()
@@ -634,16 +631,9 @@ fn header_bar(
             } else {
                 icon_text_btn("tune", "Settings", t, |st: &mut StudioState| {
                     st.settings_open = true;
-                    st.ask_agent_modal_open = false;
                 })
                 .into_any_flex()
             },
-            icon_text_btn("smart_toy", "Ask AI", t, |st: &mut StudioState| {
-                let _ = st.generate_selected_element_prompt("");
-                st.ask_agent_modal_open = !st.ask_agent_modal_open;
-                st.settings_open = false;
-            })
-            .into_any_flex(),
             primary_btn("ios_share", "Export", t, |st: &mut StudioState| {
                 st.right_tab = RightDockTab::Renders;
                 st.inspector_visible = true;
@@ -2000,14 +1990,6 @@ fn right_dock(
             })
             .into_any_flex(),
             tab(
-                "smart_toy",
-                "Agent",
-                cur == RightDockTab::AiAgent,
-                t,
-                |st| st.right_tab = RightDockTab::AiAgent,
-            )
-            .into_any_flex(),
-            tab(
                 "movie_Creation",
                 "Renders",
                 cur == RightDockTab::Renders,
@@ -2022,7 +2004,6 @@ fn right_dock(
     let content: Boxed = match state.right_tab {
         RightDockTab::Design => design_panel(state, t, dm),
         RightDockTab::Layers => layers_panel(state, t, dm),
-        RightDockTab::AiAgent => agent_panel(state, t, dm),
         RightDockTab::Renders => renders_panel(state, t, dm),
     };
 
@@ -2742,18 +2723,15 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         );
     }
 
-    // Bottom Ask AI Agent bar
+    // Inspector footer actions
     kids.push(
         flex_row((
-            primary_btn(
-                "smart_toy",
-                "Ask AI on Node",
-                t,
-                move |st: &mut StudioState| {
-                    let _ = st.generate_selected_element_prompt("");
-                    st.ask_agent_modal_open = true;
-                },
-            ),
+            icon_text_btn("unfold_more", "Expand All", t, |st: &mut StudioState| {
+                st.set_all_inspector_sections(true);
+            }),
+            icon_text_btn("unfold_less", "Collapse All", t, |st: &mut StudioState| {
+                st.set_all_inspector_sections(false);
+            }),
             FlexSpacer::Flex(1.0),
             icon_text_btn("tune", "UI Settings", t, |st: &mut StudioState| {
                 st.settings_open = true;
@@ -2939,86 +2917,6 @@ fn layers_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         .boxed()
 }
 
-fn agent_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics) -> Boxed {
-    let draft = state.chat.input_draft.clone();
-    let model = state.chat.provider_model.clone();
-    let mut kids: Vec<Child> = Vec::new();
-    kids.push(
-        flex_row((
-            icon("smart_toy", 14.0, t.accent),
-            txtw("WEBMCP AGENT", 9.0, FontWeight::SEMI_BOLD, t.accent),
-            FlexSpacer::Flex(1.0),
-            mono(model, 8.5, t.muted),
-        ))
-        .gap(5.0_f64.px())
-        .cross_axis_alignment(CrossAxisAlignment::Center)
-        .padding(Padding::from_vh(5.0, 6.0))
-        .background_color(t.bg_inset)
-        .border(t.border, 1.0)
-        .corner_radius(5.0)
-        .into_any_flex(),
-    );
-    kids.push(
-        field(draft, t, |st: &mut StudioState, next: String| {
-            st.chat.input_draft = next;
-        })
-        .into_any_flex(),
-    );
-    kids.push(
-        flex_row((
-            primary_btn("send", "Send", t, |st: &mut StudioState| {
-                let _ = st.submit_current_chat_draft();
-            }),
-            icon_text_btn("open_in_new", "Prompt v1", t, |st: &mut StudioState| {
-                let _ = st.generate_selected_element_prompt("");
-                st.ask_agent_modal_open = true;
-            }),
-            icon_text_btn("search", "/look", t, |st: &mut StudioState| {
-                let _ = st.submit_chat_prompt("/look");
-            }),
-            icon_text_btn("fact_check", "/inspect", t, |st: &mut StudioState| {
-                let _ = st.submit_chat_prompt("/inspect");
-            }),
-        ))
-        .gap(3.0_f64.px())
-        .into_any_flex(),
-    );
-    if let Some(prompt) = &state.last_copied_agent_prompt {
-        kids.push(
-            sized_box(mono(clipped(prompt, 220), 8.5, t.muted))
-                .padding(Padding::all(6.0))
-                .background_color(t.bg_inset)
-                .border(t.border_accent, 1.0)
-                .corner_radius(5.0)
-                .into_any_flex(),
-        );
-    }
-    for msg in state.chat.messages.iter().rev().take(12) {
-        kids.push(
-            flex_col((
-                txtw(
-                    format!("[{}]", msg.role.badge()),
-                    8.5,
-                    FontWeight::SEMI_BOLD,
-                    t.accent,
-                ),
-                txt(msg.content.clone(), 9.5, t.text_soft),
-            ))
-            .gap(2.5_f64.px())
-            .padding(Padding::all(6.0))
-            .background_color(t.bg_inset)
-            .border(t.border, 1.0)
-            .corner_radius(5.0)
-            .into_any_flex(),
-        );
-    }
-    flex_col(kids)
-        .gap(5.0_f64.px())
-        .cross_axis_alignment(CrossAxisAlignment::Fill)
-        .padding(Padding::all(dm.panel_pad))
-        .boxed()
-}
-
 fn renders_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics) -> Boxed {
     let out = state.export_output_path.clone();
     let fmt = state.export_format.to_uppercase();
@@ -3125,109 +3023,6 @@ fn renders_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics
         .cross_axis_alignment(CrossAxisAlignment::Fill)
         .padding(Padding::all(dm.panel_pad))
         .boxed()
-}
-
-// ── Ask AI Agent Modal Overlay (`ask_agent_modal_open`) ──────────────────────
-
-fn ask_agent_modal_overlay(
-    state: &mut StudioState,
-    t: &StudioPalette,
-) -> impl WidgetView<StudioState> {
-    let t = *t;
-    let draft = state.ask_agent_draft.clone();
-    let prompt_preview = state.last_copied_agent_prompt.clone().unwrap_or_else(|| {
-        "Select a node and type an instruction to synthesize an edit.".to_string()
-    });
-
-    let card = sized_box(
-            flex_col(vec![
-                flex_row((
-                    icon("smart_toy", 15.0, t.accent),
-                    txtw(
-                        "Ask AI Agent — Element Edit Request v1",
-                        11.5,
-                        FontWeight::SEMI_BOLD,
-                        t.text,
-                    ),
-                    FlexSpacer::Flex(1.0),
-                    icon_btn("close", t.text_soft, &t, |st: &mut StudioState| {
-                        st.ask_agent_modal_open = false;
-                    }),
-                ))
-                .cross_axis_alignment(CrossAxisAlignment::Center)
-                .padding(Padding::from_vh(8.0, 12.0))
-                .background_color(t.bg_raised)
-                .border(t.border, 1.0)
-                .into_any_flex(),
-                flex_col(vec![
-                    txt(
-                        "Describe the change for the selected node (e.g. 'set text to KINE 2.0', 'make it cyan', 'fade in', 'add film grain'):",
-                        10.0,
-                        t.text_soft,
-                    )
-                    .into_any_flex(),
-                    field(draft, &t, |st: &mut StudioState, next: String| {
-                        st.ask_agent_draft = next.clone();
-                        let _ = st.generate_selected_element_prompt(&next);
-                    })
-                    .into_any_flex(),
-                    flex_row((
-                        primary_btn("bolt", "Execute in Engine", &t, |st: &mut StudioState| {
-                            let req = st.ask_agent_draft.clone();
-                            if !req.trim().is_empty() {
-                                let _ = st.submit_chat_prompt(&req);
-                            }
-                            st.ask_agent_modal_open = false;
-                            st.right_tab = RightDockTab::AiAgent;
-                            st.inspector_visible = true;
-                        }),
-                        icon_text_btn("refresh", "Refresh Context", &t, |st: &mut StudioState| {
-                            let req = st.ask_agent_draft.clone();
-                            let _ = st.generate_selected_element_prompt(&req);
-                        }),
-                    ))
-                    .gap(6.0_f64.px())
-                    .into_any_flex(),
-                    portal(
-                        sized_box(mono(prompt_preview, 9.0, t.muted))
-                            .padding(Padding::all(8.0))
-                            .background_color(t.bg_inset)
-                            .border(t.border, 1.0)
-                            .corner_radius(6.0),
-                    )
-                    .flex(1.0)
-                    .into_any_flex(),
-                ])
-                .gap(8.0_f64.px())
-                .cross_axis_alignment(CrossAxisAlignment::Fill)
-                .padding(Padding::all(12.0))
-                .flex(1.0)
-                .into_any_flex(),
-            ])
-            .gap(0.0_f64.px())
-            .cross_axis_alignment(CrossAxisAlignment::Fill),
-        )
-        .width(560.0_f64.px())
-        .height(380.0_f64.px())
-        .background_color(t.bg_surface)
-        .border(t.border_accent, 1.5)
-        .corner_radius(10.0);
-
-    sized_box(
-        flex_col(vec![
-            FlexSpacer::Flex(1.0).into_any_flex(),
-            flex_row(vec![
-                FlexSpacer::Flex(1.0).into_any_flex(),
-                card.into_any_flex(),
-                FlexSpacer::Flex(1.0).into_any_flex(),
-            ])
-            .into_any_flex(),
-            FlexSpacer::Flex(1.0).into_any_flex(),
-        ])
-        .must_fill_major_axis(true),
-    )
-    .expand()
-    .background_color(t.scrim)
 }
 
 fn empty_state(
