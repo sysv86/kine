@@ -55,11 +55,15 @@ impl EncoderSettings {
     /// Roughly one tile per 320 columns, capped by the thread count: more tiles
     /// than workers only adds overhead, and rav1e refuses degenerate splits.
     pub fn resolved_tile_cols(&self) -> usize {
-        if self.tile_cols != 0 {
-            return self.tile_cols.clamp(1, 64);
-        }
-        let by_width = (self.width as usize) / 320;
-        by_width.clamp(1, 64).min(self.resolved_threads()).max(1)
+        let cols = if self.tile_cols != 0 {
+            self.tile_cols.clamp(1, 64)
+        } else {
+            let by_width = (self.width as usize) / 320;
+            by_width.clamp(1, 64).min(self.resolved_threads()).max(1)
+        };
+        // rav1e only accepts power-of-two tile column counts. Round the
+        // heuristic (or an explicit request) down to the nearest valid one.
+        1 << (usize::BITS - 1 - cols.leading_zeros())
     }
 }
 
