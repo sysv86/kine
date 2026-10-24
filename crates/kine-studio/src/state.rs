@@ -336,6 +336,41 @@ impl StudioState {
         self.scene_def = def.clone();
         self.source_buffer =
             serde_json::to_string_pretty(&self.scene_def).unwrap_or_else(|_| content);
+
+        // Make the loaded file the active composition so the header and status
+        // bar name the scene that is actually on the stage instead of the last
+        // built-in starter.
+        let title = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let subtitle = format!(
+            "{}x{} · loaded from {}",
+            def.width,
+            def.height,
+            path.display()
+        );
+        if let Some(index) = self
+            .compositions
+            .iter()
+            .position(|entry| entry.source_path.as_deref() == Some(path))
+        {
+            self.compositions[index].title = format!("File // {title}");
+            self.compositions[index].subtitle = subtitle;
+            self.compositions[index].scene_def = def.clone();
+            self.active_composition = index;
+        } else {
+            self.compositions.push(CompositionEntry {
+                id: format!("file-{}", self.compositions.len()),
+                title: format!("File // {title}"),
+                subtitle,
+                source_path: Some(path.to_path_buf()),
+                scene_def: def.clone(),
+            });
+            self.active_composition = self.compositions.len() - 1;
+        }
+
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.current_time = 0.0;
