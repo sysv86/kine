@@ -2,7 +2,7 @@
 //! * **MP4 (`.mp4`)** via `muxfin` (ISO-BMFF, `av01` + `avc1` + `dfLa` FLAC).
 //! * **Matroska (`.mkv`) & WebM (`.webm`)** via [`mkv::MkvMuxer`] (EBML v1 /
 //!   Matroska v4, `V_AV1` + `V_MPEG4/ISO/AVC` + `A_FLAC`).
-//! * **Hardware H.264 encode (`hwencode`)** via Vulkan Video (`gpu-video`).
+//! * **Hardware H.264 encode (`hwencode`)** via `gpu-video` (Vulkan Video on Linux, VideoToolbox on macOS).
 
 #[cfg(feature = "hwencode")]
 pub mod hwencode;

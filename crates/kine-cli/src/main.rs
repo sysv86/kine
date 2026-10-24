@@ -497,7 +497,7 @@ fn main() -> ExitCode {
                 if !opts.encoder.is_available() {
                     eprintln!(
                         "encoder {} is not available on this host: it needs a GPU adapter with \
-                         Vulkan Video encode support",
+                         hardware video encode support (Vulkan Video on Linux, VideoToolbox on macOS)",
                         opts.encoder.name(),
                     );
                     return ExitCode::FAILURE;

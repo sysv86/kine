@@ -1,5 +1,5 @@
 //! Deterministic CPU Virtual Machine for executing validated `naga` WGSL fragment
-//! shaders when running on the CPU backend (e.g., headless CI, Android PRoot, or
+//! shaders when running on the CPU backend (e.g., headless Linux/macOS CI or
 //! `--backend cpu`).
 //!
 //! Instead of silently dropping `NodeKind::Shader` layers on hosts without a GPU,

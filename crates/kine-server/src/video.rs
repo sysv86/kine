@@ -94,9 +94,9 @@ impl VideoEncoder {
         match self {
             Self::Av1Software => "av1 (rav1e, software)",
             #[cfg(feature = "hwencode")]
-            Self::H264Hardware => "h264 (vulkan video, hardware, NV12 upload)",
+            Self::H264Hardware => "h264 (hardware, NV12 upload)",
             #[cfg(feature = "zero-copy")]
-            Self::H264ZeroCopy => "h264 (vulkan video, zero-copy GPU render)",
+            Self::H264ZeroCopy => "h264 (hardware, zero-copy GPU render)",
         }
     }
 

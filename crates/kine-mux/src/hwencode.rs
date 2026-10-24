@@ -1,10 +1,9 @@
-//! Hardware H.264 encode through the **Vulkan Video** encode queue.
+//! Hardware H.264 encode through `gpu-video` (Vulkan Video on Linux, VideoToolbox on macOS).
 //!
-//! Compiled only with the `hwencode` feature: it needs a GPU whose driver
-//! implements Vulkan Video encoding (NVIDIA proprietary, RADV on VCN2/VCN3, or
-//! Intel ANV) plus the matching extensions. Without one, the probe returns
-//! `None` — a diagnosed condition, never a silent fallback to a software
-//! encoder.
+//! Compiled only with the `hwencode` feature: it requires a GPU and platform
+//! driver that expose hardware H.264 encoding (Vulkan Video on Linux or
+//! VideoToolbox on macOS). Without one, the probe returns `None` — a diagnosed
+//! condition, never a silent fallback to a software encoder.
 
 use crate::{Codec, MuxError, Muxer};
 use gpu_video::parameters::{
@@ -136,7 +135,7 @@ pub fn request_adapter() -> Result<wgpu::Adapter, MuxError> {
         .find(|adapter| probe_adapter(adapter).is_some())
         .ok_or_else(|| {
             MuxError::HwEncodeUnavailable(
-                "no adapter reports Vulkan Video encode support".to_string(),
+                "no adapter reports hardware video encode support (Vulkan Video / VideoToolbox)".to_string(),
             )
         })
 }

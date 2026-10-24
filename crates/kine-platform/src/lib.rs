@@ -1,50 +1,72 @@
-//! Platform detection and storage policy.
+//! Platform detection and storage policy for Linux and macOS.
 //!
-//! Kine targets Linux. **Android is supported through `proot`**
-//! (Termux + `proot-distro`): the engine runs as an ordinary Linux/aarch64
-//! process inside the proot container, so the same code paths apply — with two
-//! environment differences this module handles:
+//! Kine targets **Linux** (`x86_64`, `aarch64`) and **macOS** (`aarch64` Apple
+//! Silicon, `x86_64`). All core subsystems — scene layout (`taffy`), text
+//! shaping (`cosmic-text`), CPU rasterization (`vello_cpu`), CPU WGSL shader VM
+//! (`naga`), software AV1 encoding (`rav1e`), audio synthesis/DSP/mixing
+//! (`symphonia`, `rubato`, `flacenc`, `hound`), and container muxing (`muxfin`,
+//! `mkv`) — execute deterministically across both operating systems without
+//! platform-specific branches.
 //!
-//! 1. **Where to write.** Inside proot `/sdcard` may or may not be bind-mounted;
-//!    when it is absent the only writable place is `$HOME`.
-//! 2. **GPU & Vulkan ICD detection.** By default proot does not expose `/dev/dri`,
-//!    so the deterministic CPU rasterizer + CPU WGSL VM is used. However, when
-//!    Termux/proot exposes `/dev/kgsl-3d0` (Qualcomm Turnip), `/dev/dri`, or an
-//!    explicit `VK_ICD_FILENAMES` / `KINE_ALLOW_SOFTWARE_GPU`, the host probe
-//!    reports those capabilities accurately in `notes`.
+//! Optional GPU acceleration uses `wgpu` + `vello_gpu` (Vulkan on Linux, Metal
+//! on macOS), and optional hardware H.264 encoding uses `gpu-video` (Vulkan
+//! Video on Linux, VideoToolbox on macOS).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Which environment the engine believes it is running in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+/// Host operating system classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PlatformKind {
-    /// Ordinary Linux (desktop/server/container).
+    /// Linux (desktop, server, container, or CI runner).
     Linux,
-    /// Android kernel, but the process runs inside a proot container.
-    AndroidProot,
-    /// Android without proot (native binary / JNI).
-    AndroidNative,
+    /// macOS (Apple Silicon or Intel).
+    MacOs,
+    /// Any other host OS where the portable CPU pipeline runs.
+    Other,
 }
 
 impl PlatformKind {
-    pub fn is_android(self) -> bool {
-        matches!(self, Self::AndroidProot | Self::AndroidNative)
+    pub const fn is_linux(self) -> bool {
+        matches!(self, Self::Linux)
+    }
+
+    pub const fn is_macos(self) -> bool {
+        matches!(self, Self::MacOs)
+    }
+
+    /// Primary `wgpu` graphics backend expected on this OS.
+    pub const fn graphics_backend(self) -> &'static str {
+        match self {
+            Self::Linux => "vulkan",
+            Self::MacOs => "metal",
+            Self::Other => "wgpu",
+        }
+    }
+
+    /// Hardware video encode backend expected on this OS when compiled with `hwencode`.
+    pub const fn hw_video_backend(self) -> &'static str {
+        match self {
+            Self::Linux => "vulkan-video",
+            Self::MacOs => "videotoolbox",
+            Self::Other => "unavailable",
+        }
     }
 }
 
-/// Raw, injectable observations about the environment.
+/// Raw, injectable observations about the host environment.
 #[derive(Debug, Clone, Default)]
 pub struct Facts {
+    /// Target OS string (e.g. `"linux"`, `"macos"`). When empty, defaults to `std::env::consts::OS`.
+    pub os: String,
+    /// Target architecture string (e.g. `"x86_64"`, `"aarch64"`). When empty, defaults to `std::env::consts::ARCH`.
+    pub arch: String,
+    /// Current working directory of the process.
+    pub cwd: Option<PathBuf>,
+    /// Relevant environment variables (`HOME`, `KINE_OUTPUT_DIR`, `CI`, `GITHUB_ACTIONS`, etc.).
     pub env: BTreeMap<String, String>,
-    pub android_root_exists: bool,
-    pub system_build_prop_exists: bool,
-    /// Contents of `/proc/version`, when readable.
-    pub proc_version: Option<String>,
-    /// A writable shared-storage root, e.g. `/sdcard` or `/storage/emulated/0`.
-    pub shared_storage: Option<PathBuf>,
-    /// Whether `/dev/dri` or `/dev/kgsl-3d0` is visible in the filesystem.
-    pub drm_or_kgsl_exists: bool,
+    /// Whether Linux DRM render nodes (`/dev/dri/renderD128` or `/dev/dri/card0`) exist.
+    pub linux_drm_device_present: bool,
 }
 
 impl Facts {
@@ -52,18 +74,13 @@ impl Facts {
     pub fn collect() -> Self {
         let mut env = BTreeMap::new();
         for key in [
-            "TERMUX_VERSION",
-            "PREFIX",
             "HOME",
-            "EXTERNAL_STORAGE",
-            "ANDROID_ROOT",
-            "ANDROID_DATA",
-            "PROOT_LOADER",
-            "PROOT_TMP_DIR",
-            "PROOT_NO_SECCOMP",
+            "KINE_OUTPUT_DIR",
             "VK_ICD_FILENAMES",
             "VK_DRIVER_FILES",
             "KINE_ALLOW_SOFTWARE_GPU",
+            "CI",
+            "GITHUB_ACTIONS",
         ] {
             if let Ok(v) = std::env::var(key) {
                 env.insert(key.to_string(), v);
@@ -71,22 +88,15 @@ impl Facts {
         }
 
         let exists = |p: &str| Path::new(p).exists();
-        let shared_storage = ["/sdcard", "/storage/emulated/0"]
-            .into_iter()
-            .find(|p| Path::new(p).is_dir())
-            .map(PathBuf::from);
-
-        let proc_version = std::fs::read_to_string("/proc/version").ok();
-        let drm_or_kgsl_exists =
-            exists("/dev/dri/renderD128") || exists("/dev/dri/card0") || exists("/dev/kgsl-3d0");
+        let linux_drm_device_present =
+            exists("/dev/dri/renderD128") || exists("/dev/dri/card0");
 
         Self {
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+            cwd: std::env::current_dir().ok(),
             env,
-            android_root_exists: exists("/system") || exists("/system/bin"),
-            system_build_prop_exists: exists("/system/build.prop"),
-            proc_version,
-            shared_storage,
-            drm_or_kgsl_exists,
+            linux_drm_device_present,
         }
     }
 
@@ -94,99 +104,111 @@ impl Facts {
         self.env.get(key).is_some_and(|v| !v.is_empty())
     }
 
-    /// Whether the running kernel identifies itself as a proot container.
-    fn proc_version_mentions_proot(&self) -> bool {
-        self.proc_version
-            .as_deref()
-            .is_some_and(|v| v.to_ascii_lowercase().contains("proot"))
+    fn is_ci(&self) -> bool {
+        self.has("CI") || self.has("GITHUB_ACTIONS")
     }
 }
 
-/// Classified platform description, suitable for `doctor` output.
+/// Classified platform description, suitable for `kine host` and `kine doctor`.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PlatformInfo {
-    pub os: &'static str,
-    pub arch: &'static str,
+    pub os: String,
+    pub arch: String,
     pub kind: PlatformKind,
-    /// Running inside the Termux app (as opposed to a plain chroot).
-    pub termux: bool,
-    /// Where relative output paths resolve to.
+    /// Primary GPU backend on this platform (`"vulkan"`, `"metal"`, or `"wgpu"`).
+    pub graphics_backend: &'static str,
+    /// Hardware video encode backend on this platform (`"vulkan-video"`, `"videotoolbox"`, or `"unavailable"`).
+    pub hw_video_backend: &'static str,
+    /// Running inside an automated CI environment (`CI` or `GITHUB_ACTIONS` set).
+    pub ci: bool,
+    /// Where relative output paths resolve to (`KINE_OUTPUT_DIR`, or current working directory).
     pub output_dir: PathBuf,
-    /// Whether a hardware encoder can be expected at all.
+    /// Whether a GPU / hardware encoder can be expected on this host.
     pub gpu_expected: bool,
-    /// Human-readable diagnostics (`doctor` prints these verbatim).
+    /// Human-readable diagnostics (`doctor` and `host` print these verbatim).
     pub notes: Vec<String>,
 }
 
 impl PlatformInfo {
     /// Classify collected [`Facts`].
     pub fn from_facts(facts: &Facts) -> Self {
-        let termux = facts.has("TERMUX_VERSION") || facts.has("PREFIX");
-        let proot = facts.has("PROOT_LOADER")
-            || facts.has("PROOT_TMP_DIR")
-            || facts.has("PROOT_NO_SECCOMP")
-            || facts.proc_version_mentions_proot();
-        let android = facts.android_root_exists
-            || facts.system_build_prop_exists
-            || facts.has("ANDROID_ROOT")
-            || facts.has("ANDROID_DATA")
-            || facts.has("EXTERNAL_STORAGE");
-
-        let kind = if android && proot {
-            PlatformKind::AndroidProot
-        } else if android {
-            PlatformKind::AndroidNative
+        let os_str = if facts.os.is_empty() {
+            std::env::consts::OS
         } else {
-            PlatformKind::Linux
+            facts.os.as_str()
+        };
+        let arch_str = if facts.arch.is_empty() {
+            std::env::consts::ARCH
+        } else {
+            facts.arch.as_str()
         };
 
-        let output_dir = default_output_dir(facts, kind);
-        let mut notes = Vec::new();
+        let kind = match os_str {
+            "linux" => PlatformKind::Linux,
+            "macos" => PlatformKind::MacOs,
+            _ => PlatformKind::Other,
+        };
 
+        let ci = facts.is_ci();
+        let output_dir = default_output_dir(facts);
+        let graphics_backend = kind.graphics_backend();
+        let hw_video_backend = kind.hw_video_backend();
+
+        let sw_gpu = facts
+            .env
+            .get("KINE_ALLOW_SOFTWARE_GPU")
+            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+        let vk_icd = facts.has("VK_ICD_FILENAMES") || facts.has("VK_DRIVER_FILES");
+
+        let gpu_expected = match kind {
+            PlatformKind::Linux => facts.linux_drm_device_present || vk_icd || sw_gpu,
+            PlatformKind::MacOs => true,
+            PlatformKind::Other => false,
+        };
+
+        let mut notes = Vec::new();
         match kind {
-            PlatformKind::AndroidProot => {
-                notes.push(
-                    "Android via proot: CPU rasterizer only (proot cannot expose /dev/dri, so \
-                     Vulkan Video encode is unavailable)."
-                        .to_string(),
-                );
-                if facts.drm_or_kgsl_exists || facts.has("VK_ICD_FILENAMES") || facts.has("VK_DRIVER_FILES") {
-                    notes.push(
-                        "Vulkan ICD / KGSL device node detected inside proot; wgpu rasterization \
-                         may be usable via Turnip/Lavapipe."
-                            .to_string(),
-                    );
-                }
-                notes.push(format!("Outputs resolve to {}", output_dir.display()));
-                if facts.shared_storage.is_none() {
-                    notes.push(
-                        "No shared storage visible inside proot; run `termux-setup-storage` in \
-                         Termux (or bind-mount /sdcard) to write to /sdcard/Download."
-                            .to_string(),
-                    );
-                }
-            }
-            PlatformKind::AndroidNative => {
-                notes.push(
-                    "Native Android (JNI/NDK): MediaCodec/Vulkan surface path; CPU rasterizer + \
-                     CPU WGSL VM active by default (Vulkan Video is not available on Android)."
-                        .to_string(),
-                );
-            }
             PlatformKind::Linux => {
-                if facts.shared_storage.is_none() {
-                    notes.push(format!("Outputs resolve to {}", output_dir.display()));
+                if facts.linux_drm_device_present {
+                    notes.push(
+                        "Linux host with DRM device (/dev/dri): Vulkan GPU rasterization and Vulkan Video encode supported when built with `--features gpu,hwencode`."
+                            .to_string(),
+                    );
+                } else if vk_icd || sw_gpu {
+                    notes.push(
+                        "Linux host without /dev/dri, but explicit Vulkan ICD or software GPU enabled."
+                            .to_string(),
+                    );
+                } else {
+                    notes.push(
+                        "Linux headless host (no /dev/dri): deterministic CPU rasterizer (`vello_cpu`) + CPU WGSL VM active."
+                            .to_string(),
+                    );
                 }
+            }
+            PlatformKind::MacOs => {
+                notes.push(
+                    "macOS host: Metal GPU rasterization (`wgpu`) and VideoToolbox H.264 hardware encode supported alongside the deterministic CPU pipeline."
+                        .to_string(),
+                );
+            }
+            PlatformKind::Other => {
+                notes.push(format!(
+                    "Unclassified OS ({os_str}): using portable deterministic CPU pipeline."
+                ));
             }
         }
+        notes.push(format!("Outputs resolve to {}", output_dir.display()));
 
         Self {
-            os: std::env::consts::OS,
-            arch: std::env::consts::ARCH,
+            os: os_str.to_string(),
+            arch: arch_str.to_string(),
             kind,
-            termux,
+            graphics_backend,
+            hw_video_backend,
+            ci,
             output_dir,
-            gpu_expected: !kind.is_android(),
+            gpu_expected,
             notes,
         }
     }
@@ -197,19 +219,15 @@ impl PlatformInfo {
     }
 }
 
-fn default_output_dir(facts: &Facts, kind: PlatformKind) -> PathBuf {
-    if kind.is_android() {
-        if let Some(storage) = &facts.shared_storage {
-            let download = storage.join("Download");
-            if download.is_dir() {
-                return download;
-            }
-            return download;
+fn default_output_dir(facts: &Facts) -> PathBuf {
+    if let Some(custom) = facts.env.get("KINE_OUTPUT_DIR") {
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
         }
-        if let Some(external) = facts.env.get("EXTERNAL_STORAGE") {
-            if !external.is_empty() {
-                return PathBuf::from(external);
-            }
+    }
+    if let Some(cwd) = &facts.cwd {
+        if !cwd.as_os_str().is_empty() {
+            return cwd.clone();
         }
     }
     if let Some(home) = facts.env.get("HOME") {
@@ -217,7 +235,7 @@ fn default_output_dir(facts: &Facts, kind: PlatformKind) -> PathBuf {
             return PathBuf::from(home);
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    PathBuf::from(".")
 }
 
 /// Resolve a user-supplied output path.
@@ -229,7 +247,7 @@ pub fn resolve_output(requested: &Path, info: &PlatformInfo) -> PathBuf {
     }
 }
 
-/// Write bytes to `path`, creating parent directories.
+/// Write bytes to `path`, creating parent directories and cleaning up on failure.
 pub fn write_output(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -249,98 +267,82 @@ pub fn write_output(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    fn facts_with(pairs: &[(&str, &str)]) -> Facts {
+    fn facts_for(os: &str, arch: &str, pairs: &[(&str, &str)]) -> Facts {
         Facts {
+            os: os.to_string(),
+            arch: arch.to_string(),
+            cwd: Some(PathBuf::from("/work/project")),
             env: pairs
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
-            ..Default::default()
+            linux_drm_device_present: false,
         }
     }
 
     #[test]
-    fn plain_linux_is_not_android() {
-        let info = PlatformInfo::from_facts(&facts_with(&[("HOME", "/root")]));
+    fn linux_desktop_with_drm_expects_vulkan_gpu() {
+        let mut facts = facts_for("linux", "x86_64", &[("HOME", "/home/dev")]);
+        facts.linux_drm_device_present = true;
+        let info = PlatformInfo::from_facts(&facts);
         assert_eq!(info.kind, PlatformKind::Linux);
-        assert!(!info.termux);
+        assert!(info.kind.is_linux());
+        assert!(!info.kind.is_macos());
+        assert_eq!(info.graphics_backend, "vulkan");
+        assert_eq!(info.hw_video_backend, "vulkan-video");
         assert!(info.gpu_expected);
-        assert_eq!(info.output_dir, PathBuf::from("/root"));
+        assert!(!info.ci);
+        assert_eq!(info.output_dir, PathBuf::from("/work/project"));
     }
 
     #[test]
-    fn android_proot_is_detected_from_proot_markers() {
-        let mut facts = facts_with(&[
-            ("ANDROID_ROOT", "/system"),
-            ("PROOT_TMP_DIR", "/tmp"),
-            ("TERMUX_VERSION", "0.118"),
-            ("HOME", "/root"),
-        ]);
-        facts.android_root_exists = true;
-        facts.shared_storage = Some(PathBuf::from("/sdcard"));
-
+    fn linux_headless_ci_uses_cpu_when_no_drm_present() {
+        let facts = facts_for(
+            "linux",
+            "x86_64",
+            &[("HOME", "/home/runner"), ("GITHUB_ACTIONS", "true")],
+        );
         let info = PlatformInfo::from_facts(&facts);
-        assert_eq!(info.kind, PlatformKind::AndroidProot);
-        assert!(info.termux);
-        assert!(!info.gpu_expected, "proot cannot reach the GPU");
-        assert!(info.notes.iter().any(|n| n.contains("proot")));
-    }
-
-    #[test]
-    fn android_without_proot_is_native() {
-        let mut facts = facts_with(&[("HOME", "/data")]);
-        facts.system_build_prop_exists = true;
-        let info = PlatformInfo::from_facts(&facts);
-        assert_eq!(info.kind, PlatformKind::AndroidNative);
-        assert!(info.notes.iter().any(|n| n.contains("MediaCodec")));
-    }
-
-    #[test]
-    fn proot_is_detected_from_the_kernel_string_alone() {
-        let mut facts = facts_with(&[("HOME", "/root")]);
-        facts.android_root_exists = true;
-        facts.proc_version =
-            Some("Linux version 6.17.0-PRoot-Distro (root@build) #1 SMP aarch64".to_string());
-        facts.shared_storage = Some(PathBuf::from("/sdcard"));
-
-        let info = PlatformInfo::from_facts(&facts);
-        assert_eq!(info.kind, PlatformKind::AndroidProot);
+        assert_eq!(info.kind, PlatformKind::Linux);
+        assert!(info.ci);
         assert!(!info.gpu_expected);
-        assert_eq!(info.output_dir, PathBuf::from("/sdcard/Download"));
+        assert!(info.notes.iter().any(|n| n.contains("headless")));
     }
 
     #[test]
-    fn android_without_shared_storage_falls_back_to_home_with_a_note() {
-        let mut facts = facts_with(&[
-            ("ANDROID_ROOT", "/system"),
-            ("PROOT_LOADER", "/libexec/proot"),
-            ("HOME", "/data/data/com.termux/files/home"),
-        ]);
-        facts.android_root_exists = true;
-        facts.shared_storage = None;
-
+    fn macos_apple_silicon_reports_metal_and_videotoolbox() {
+        let facts = facts_for("macos", "aarch64", &[("HOME", "/Users/runner")]);
         let info = PlatformInfo::from_facts(&facts);
-        assert_eq!(
-            info.output_dir,
-            PathBuf::from("/data/data/com.termux/files/home")
+        assert_eq!(info.kind, PlatformKind::MacOs);
+        assert!(info.kind.is_macos());
+        assert!(!info.kind.is_linux());
+        assert_eq!(info.graphics_backend, "metal");
+        assert_eq!(info.hw_video_backend, "videotoolbox");
+        assert!(info.gpu_expected);
+        assert!(info.notes.iter().any(|n| n.contains("Metal")));
+    }
+
+    #[test]
+    fn kine_output_dir_env_overrides_cwd() {
+        let facts = facts_for(
+            "linux",
+            "x86_64",
+            &[("KINE_OUTPUT_DIR", "/tmp/kine-renders")],
         );
-        assert!(
-            info.notes.iter().any(|n| n.contains("termux-setup-storage")),
-            "should tell the user how to fix it: {:?}",
-            info.notes
-        );
+        let info = PlatformInfo::from_facts(&facts);
+        assert_eq!(info.output_dir, PathBuf::from("/tmp/kine-renders"));
     }
 
     #[test]
     fn resolve_output_honours_absolute_and_prefixes_relative() {
-        let info = PlatformInfo::from_facts(&facts_with(&[("HOME", "/home/u")]));
+        let info = PlatformInfo::from_facts(&facts_for("macos", "aarch64", &[]));
         assert_eq!(
             resolve_output(Path::new("/tmp/a.png"), &info),
             PathBuf::from("/tmp/a.png")
         );
         assert_eq!(
             resolve_output(Path::new("frame.png"), &info),
-            PathBuf::from("/home/u/frame.png")
+            PathBuf::from("/work/project/frame.png")
         );
     }
 

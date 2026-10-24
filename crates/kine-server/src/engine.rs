@@ -24,7 +24,7 @@ pub struct DoctorReport {
     pub formats: Vec<&'static str>,
     pub fonts: Vec<String>,
     pub platform: &'static str,
-    /// Host environment policy: Android/proot detection, output directory, notes.
+    /// Host environment policy: Linux/macOS detection, graphics backend, output directory, notes.
     pub host: kine_platform::PlatformInfo,
     /// Whether a hardware H.264 encoder is compiled in *and* usable here.
     pub hw_encode_available: bool,
@@ -995,6 +995,10 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         let (engine, _) = engine_with_scene();
         let doc = engine.doctor();
         assert!(!doc.host.output_dir.as_os_str().is_empty());
-        assert!(!doc.host.gpu_expected || !doc.host.kind.is_android());
+        assert!(
+            doc.host.kind.is_linux()
+                || doc.host.kind.is_macos()
+                || matches!(doc.host.kind, kine_platform::PlatformKind::Other)
+        );
     }
 }
