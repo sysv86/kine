@@ -166,6 +166,8 @@ pub struct StudioState {
     #[cfg(feature = "xilem-ui")]
     pub frame_image_data: xilem::masonry::peniko::ImageData,
     pub frame_revision: u64,
+    /// Wall-clock time of the last preview rasterization, for the status bar.
+    pub last_render_ms: f32,
     pub inspect_findings: Vec<Finding>,
 
     // ── AI Agent Chat & Prompt Modal ───────────────────────────────────────
@@ -254,6 +256,7 @@ impl StudioState {
             #[cfg(feature = "xilem-ui")]
             frame_image_data,
             frame_revision: 0,
+            last_render_ms: 0.0,
             inspect_findings: Vec::new(),
             chat: StudioChatSession::new(),
             ask_agent_draft: String::new(),
@@ -348,6 +351,7 @@ impl StudioState {
 
     /// Re-evaluate animations & layout at `self.current_time` and rasterize the frame in-process.
     pub fn render_current_frame(&mut self) -> Result<(), StudioError> {
+        let started = std::time::Instant::now();
         let frame_idx = self.current_frame_index();
         let pixmap = self.engine.render_frame_at_with_index(
             self.scene_handle,
@@ -362,6 +366,7 @@ impl StudioState {
         self.last_raw_pixmap = pixmap;
         self.last_viewport_pixmap = viewport_px;
         self.frame_revision = self.frame_revision.wrapping_add(1);
+        self.last_render_ms = started.elapsed().as_secs_f32() * 1000.0;
         Ok(())
     }
 
@@ -499,10 +504,15 @@ impl StudioState {
     }
 
     /// Advance the playback clock by `dt_real_seconds` when `self.is_playing` is true.
+    ///
+    /// The UI ticker runs faster than the composition frame rate. Rasterizing on
+    /// every tick would waste the whole frame budget, so only redraw when the
+    /// integer frame under the playhead actually changes.
     pub fn tick_playback(&mut self, dt_real_seconds: f64) {
         if !self.is_playing {
             return;
         }
+        let previous_frame = self.current_frame_index();
         let next = self.current_time + dt_real_seconds * self.playback_rate;
         if next >= self.duration {
             if self.loop_enabled {
@@ -514,7 +524,9 @@ impl StudioState {
         } else {
             self.current_time = next.max(0.0);
         }
-        let _ = self.render_current_frame();
+        if self.current_frame_index() != previous_frame || !self.is_playing {
+            let _ = self.render_current_frame();
+        }
     }
 
     /// Snap a timestamp to the nearest keyframe, quarter-second tick, or frame boundary.

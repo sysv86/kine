@@ -33,7 +33,7 @@ taffy.workspace = true
 xilem = { workspace = true, optional = true }
 
 [features]
-default = ["xilem-ui"]
+default = ["xilem-ui", "gpu"]
 # Native Xilem reactive desktop UI (Linux X11/Wayland, Windows DX12/Vulkan, macOS Metal).
 xilem-ui = ["dep:xilem"]
 # Forward GPU rasterization and hardware video encoding features to the in-process engine.

@@ -22,7 +22,7 @@ serde_json.workspace = true
 taffy.workspace = true
 
 [features]
-default = ["studio-ui"]
+default = ["studio-ui", "gpu"]
 # Native Xilem desktop UI for `kine studio`.
 studio-ui = ["kine-studio/xilem-ui"]
 # Hardware H.264 encode (Vulkan Video) in addition to the software AV1 path.

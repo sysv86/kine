@@ -6,6 +6,10 @@ pub mod agent_tools;
 pub mod catalog;
 pub mod chat;
 pub mod inspector;
+#[cfg(feature = "xilem-ui")]
+pub mod local_portal;
+#[cfg(feature = "xilem-ui")]
+pub mod preview_canvas;
 pub mod state;
 pub mod theme;
 pub mod timeline;

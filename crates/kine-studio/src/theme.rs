@@ -1,342 +1,222 @@
-//! Hyperframes Studio visual design tokens & styled Xilem widget builders for Kine Studio.
+//! Kine Studio design tokens.
 //!
-//! Directly translates the **Graphite (Dark)** and **Paper (Light)** OKLCH/sRGB
-//! palettes, 10px dock card geometry, 6px shell gutters, and semantic track colors
-//! from Hyperframes Studio (`packages/studio/src/styles/theme.css` & `dock.css`).
+//! The values are a deliberate blend of two open-source references:
+//! - OpenCode Desktop (`anomalyco/opencode`, MIT): inset shell, floating panel cards,
+//!   neutral-only chrome, neutral alpha state washes.
+//! - HyperFrames Studio (`heygen-com/hyperframes`, Apache-2.0): warm-graphite surface ladder,
+//!   mint signal colour, editor density constants and timeline geometry.
+//!
+//! Everything is precomputed as `Color` values. Xilem 0.4 has no `color-mix()` or CSS
+//! inheritance, so each role is resolved here once and passed down as a `Copy` token set.
 
 #[cfg(feature = "xilem-ui")]
-use xilem::{
-    masonry::{core::ArcStr, parley::style::FontWeight},
-    style::Style as _,
-    view::{button, flex_row, label, sized_box, CrossAxisAlignment},
-    Color, WidgetView,
-};
+use xilem::Color;
 
-/// Complete semantic color palette for Kine Studio (Graphite Dark or Paper Light).
+/// Bundled UI face. The font is registered in `run_studio` through `Xilem::with_font`.
+#[cfg(feature = "xilem-ui")]
+pub const UI_FONT: &str = "Inter Variable";
+/// Bundled mono face for timecode, ids, property values and telemetry.
+#[cfg(feature = "xilem-ui")]
+pub const MONO_FONT: &str = "JetBrains Mono";
+/// Google Material Symbols Outlined (ligature icon font).
+#[cfg(feature = "xilem-ui")]
+pub const ICON_FONT: &str = "Material Symbols Outlined";
+
+/// Floating panel card radius.
+pub const PANEL_RADIUS: f64 = 10.0;
+/// Gap between panel cards and shell edge.
+pub const SHELL_GAP: f64 = 6.0;
+/// Header height.
+pub const HEADER_H: f64 = 40.0;
+/// Dock tab height.
+pub const TAB_H: f64 = 28.0;
+/// Default control height.
+pub const CONTROL_H: f64 = 28.0;
+/// Compact inspector row height.
+pub const ROW_H: f64 = 30.0;
+/// Timeline track header width.
+pub const TRACK_GUTTER: f64 = 184.0;
+/// Timeline track row height.
+pub const TRACK_H: f64 = 34.0;
+/// Timeline ruler height.
+pub const RULER_H: f64 = 24.0;
+
+/// Complete semantic palette for Kine Studio (Graphite / Paper).
 #[cfg(feature = "xilem-ui")]
 #[derive(Debug, Clone, Copy)]
 pub struct StudioPalette {
-    /// Outer window shell background (`--color-bg-0`).
+    /// Window frame behind the floating cards.
     pub bg_shell: Color,
-    /// Dock card surface (`--color-surface`).
+    /// Panel card surface.
     pub bg_surface: Color,
-    /// Recessed inset surface for open inspector sections & timeline gutter (`--color-input` / `--timeline-gutter-bg`).
+    /// Recessed field / inspector body.
     pub bg_inset: Color,
-    /// Raised surface for active tabs, headers, and pills (`--color-raised`).
+    /// Raised row, popover, active tab.
     pub bg_raised: Color,
-    /// Recessed dark preview stage well (stays dark in both themes, matching Hyperframes `PreviewPane`).
-    pub bg_preview_well: Color,
-    /// Subtle hairline border (`--color-border`).
-    pub border_hairline: Color,
-    /// Stronger card/control border (`--color-border-strong`).
+    /// Preview well behind the rendered frame.
+    pub bg_stage: Color,
+
+    /// Default 1px separator.
+    pub border: Color,
+    /// Card / input outline.
     pub border_strong: Color,
-    /// Primary high-contrast ink (`--color-text-0`).
-    pub text_primary: Color,
-    /// Secondary body ink (`--color-text-2`).
-    pub text_secondary: Color,
-    /// Muted label/timecode ink (`--color-text-muted`).
-    pub text_muted: Color,
-    /// Hyperframes signature mint accent (`--color-accent` `#3ce6ac`).
-    pub accent_mint: Color,
-    /// Subtle translucent mint wash for active toggles (`--color-on`).
-    pub accent_mint_wash: Color,
-    /// Brand cyan accent (`--color-brand-gradient-from` `#06e3fa`).
-    pub accent_cyan: Color,
-    /// Selection sky blue (`--color-selection` `#4ba3d2`).
-    pub selection_sky: Color,
-    /// Danger / Auto-keyframe recording coral (`--color-danger` `#ef4444`).
-    pub danger_coral: Color,
-    /// Warning amber (`--color-container` `#f5a623`).
-    pub warning_amber: Color,
-    /// Visual timeline clip fill (`--timeline-clip-bg`).
-    pub clip_visual_bg: Color,
-    /// Selected visual timeline clip fill (`--timeline-clip-bg-active`).
-    pub clip_visual_active: Color,
-    /// Audio timeline clip violet fill (`--timeline-clip-audio-bg`).
-    pub clip_audio_bg: Color,
-    /// WGSL shader timeline clip teal/cyan fill.
-    pub clip_shader_bg: Color,
+    /// Accent outline for selected cards.
+    pub border_accent: Color,
+
+    /// Primary ink.
+    pub text: Color,
+    /// Secondary ink.
+    pub text_soft: Color,
+    /// Muted labels and metadata.
+    pub muted: Color,
+    /// Disabled ink.
+    pub off: Color,
+
+    /// Kine mint signal colour.
+    pub accent: Color,
+    /// Hovered mint.
+    pub accent_hover: Color,
+    /// Mint used as text on a dark surface.
+    pub accent_ink: Color,
+    /// Ink painted on a mint fill.
+    pub on_accent: Color,
+    /// Translucent mint wash for toggled controls.
+    pub accent_wash: Color,
+
+    /// Selection blue (deliberately distinct from mint).
+    pub selection: Color,
+    /// Playhead ink.
+    pub playhead: Color,
+
+    pub danger: Color,
+    pub danger_wash: Color,
+    pub warning: Color,
+    pub warning_wash: Color,
+
+    /// Media / video kind colour.
+    pub media: Color,
+    /// Container / layout node kind colour.
+    pub container: Color,
+    /// Audio track violet.
+    pub audio: Color,
+    pub audio_wash: Color,
+
+    /// Neutral timeline clip fill.
+    pub clip: Color,
+    pub clip_active: Color,
+    pub clip_shader: Color,
+
+    /// Hover wash (neutral overlay).
+    pub hover: Color,
+    /// Press / selected row wash.
+    pub press: Color,
+    /// Modal scrim.
+    pub scrim: Color,
 }
 
 #[cfg(feature = "xilem-ui")]
 impl StudioPalette {
-    /// Default **Graphite Dark** palette from Hyperframes Studio (`theme.css`).
-    pub const fn graphite_dark() -> Self {
+    /// Warm Graphite, the primary theme.
+    pub const fn graphite() -> Self {
         Self {
-            bg_shell: Color::from_rgb8(24, 24, 26),
-            bg_surface: Color::from_rgb8(31, 31, 34),
-            bg_inset: Color::from_rgb8(20, 20, 22),
-            bg_raised: Color::from_rgb8(42, 42, 46),
-            bg_preview_well: Color::from_rgb8(10, 10, 12),
-            border_hairline: Color::from_rgb8(46, 46, 52),
-            border_strong: Color::from_rgb8(63, 63, 70),
-            text_primary: Color::from_rgb8(244, 244, 245),
-            text_secondary: Color::from_rgb8(212, 212, 216),
-            text_muted: Color::from_rgb8(152, 152, 160),
-            accent_mint: Color::from_rgb8(60, 230, 172),
-            accent_mint_wash: Color::from_rgb8(22, 58, 47),
-            accent_cyan: Color::from_rgb8(6, 227, 250),
-            selection_sky: Color::from_rgb8(75, 163, 210),
-            danger_coral: Color::from_rgb8(239, 68, 68),
-            warning_amber: Color::from_rgb8(245, 166, 35),
-            clip_visual_bg: Color::from_rgb8(38, 52, 49),
-            clip_visual_active: Color::from_rgb8(28, 82, 66),
-            clip_audio_bg: Color::from_rgb8(88, 56, 150),
-            clip_shader_bg: Color::from_rgb8(24, 74, 96),
+            bg_shell: Color::from_rgb8(18, 17, 15),
+            bg_surface: Color::from_rgb8(32, 30, 27),
+            bg_inset: Color::from_rgb8(26, 25, 23),
+            bg_raised: Color::from_rgb8(47, 44, 41),
+            bg_stage: Color::from_rgb8(14, 13, 12),
+
+            border: Color::from_rgba8(255, 255, 255, 20),
+            border_strong: Color::from_rgba8(255, 255, 255, 36),
+            border_accent: Color::from_rgba8(61, 228, 168, 110),
+
+            text: Color::from_rgb8(245, 243, 241),
+            text_soft: Color::from_rgb8(226, 224, 222),
+            muted: Color::from_rgb8(184, 182, 180),
+            off: Color::from_rgb8(151, 149, 147),
+
+            accent: Color::from_rgb8(61, 228, 168),
+            accent_hover: Color::from_rgb8(84, 245, 184),
+            accent_ink: Color::from_rgb8(65, 230, 170),
+            on_accent: Color::from_rgb8(0, 28, 17),
+            accent_wash: Color::from_rgba8(61, 228, 168, 38),
+
+            selection: Color::from_rgb8(75, 163, 210),
+            playhead: Color::from_rgb8(245, 243, 241),
+
+            danger: Color::from_rgb8(255, 156, 148),
+            danger_wash: Color::from_rgba8(255, 92, 82, 34),
+            warning: Color::from_rgb8(255, 185, 0),
+            warning_wash: Color::from_rgba8(255, 185, 0, 30),
+
+            media: Color::from_rgb8(0, 227, 255),
+            container: Color::from_rgb8(245, 166, 35),
+            audio: Color::from_rgb8(150, 111, 214),
+            audio_wash: Color::from_rgba8(96, 67, 141, 120),
+
+            clip: Color::from_rgb8(49, 57, 53),
+            clip_active: Color::from_rgb8(40, 92, 73),
+            clip_shader: Color::from_rgb8(30, 70, 88),
+
+            hover: Color::from_rgba8(255, 255, 255, 18),
+            press: Color::from_rgba8(255, 255, 255, 30),
+            scrim: Color::from_rgba8(0, 0, 0, 160),
         }
     }
 
-    /// **Paper Light** palette from Hyperframes Studio (`data-theme="paper"` in `theme.css`).
-    pub const fn paper_light() -> Self {
+    /// Warm Paper, a real light variant (not an inverted dark theme).
+    pub const fn paper() -> Self {
         Self {
-            bg_shell: Color::from_rgb8(236, 235, 231),
-            bg_surface: Color::from_rgb8(250, 249, 246),
-            bg_inset: Color::from_rgb8(242, 240, 236),
+            bg_shell: Color::from_rgb8(236, 234, 229),
+            bg_surface: Color::from_rgb8(253, 251, 248),
+            bg_inset: Color::from_rgb8(246, 244, 240),
             bg_raised: Color::from_rgb8(255, 255, 255),
-            bg_preview_well: Color::from_rgb8(14, 14, 17),
-            border_hairline: Color::from_rgb8(218, 216, 210),
-            border_strong: Color::from_rgb8(196, 193, 186),
-            text_primary: Color::from_rgb8(28, 27, 26),
-            text_secondary: Color::from_rgb8(72, 70, 66),
-            text_muted: Color::from_rgb8(118, 115, 108),
-            accent_mint: Color::from_rgb8(16, 138, 98),
-            accent_mint_wash: Color::from_rgb8(214, 245, 233),
-            accent_cyan: Color::from_rgb8(8, 145, 178),
-            selection_sky: Color::from_rgb8(37, 118, 172),
-            danger_coral: Color::from_rgb8(220, 38, 38),
-            warning_amber: Color::from_rgb8(202, 118, 12),
-            clip_visual_bg: Color::from_rgb8(212, 236, 228),
-            clip_visual_active: Color::from_rgb8(178, 226, 208),
-            clip_audio_bg: Color::from_rgb8(224, 212, 248),
-            clip_shader_bg: Color::from_rgb8(206, 234, 246),
+            bg_stage: Color::from_rgb8(24, 23, 21),
+
+            border: Color::from_rgba8(0, 0, 0, 22),
+            border_strong: Color::from_rgba8(0, 0, 0, 40),
+            border_accent: Color::from_rgba8(1, 130, 91, 120),
+
+            text: Color::from_rgb8(24, 23, 22),
+            text_soft: Color::from_rgb8(73, 72, 71),
+            muted: Color::from_rgb8(101, 100, 98),
+            off: Color::from_rgb8(128, 127, 125),
+
+            accent: Color::from_rgb8(1, 130, 91),
+            accent_hover: Color::from_rgb8(2, 113, 79),
+            accent_ink: Color::from_rgb8(0, 101, 71),
+            on_accent: Color::from_rgb8(255, 255, 255),
+            accent_wash: Color::from_rgba8(1, 130, 91, 30),
+
+            selection: Color::from_rgb8(0, 106, 165),
+            playhead: Color::from_rgb8(24, 23, 22),
+
+            danger: Color::from_rgb8(204, 51, 54),
+            danger_wash: Color::from_rgba8(204, 51, 54, 28),
+            warning: Color::from_rgb8(142, 84, 0),
+            warning_wash: Color::from_rgba8(245, 166, 35, 34),
+
+            media: Color::from_rgb8(0, 113, 135),
+            container: Color::from_rgb8(161, 97, 0),
+            audio: Color::from_rgb8(96, 67, 141),
+            audio_wash: Color::from_rgba8(96, 67, 141, 34),
+
+            clip: Color::from_rgb8(222, 233, 229),
+            clip_active: Color::from_rgb8(178, 226, 208),
+            clip_shader: Color::from_rgb8(206, 234, 246),
+
+            hover: Color::from_rgba8(0, 0, 0, 14),
+            press: Color::from_rgba8(0, 0, 0, 28),
+            scrim: Color::from_rgba8(0, 0, 0, 110),
         }
     }
 
     pub const fn for_mode(dark: bool) -> Self {
         if dark {
-            Self::graphite_dark()
+            Self::graphite()
         } else {
-            Self::paper_light()
+            Self::paper()
         }
     }
-}
-
-/// Build a dock tab pill with an active top-rounded highlight (`dock.css` `.hf-dock-tab-fill`).
-#[cfg(feature = "xilem-ui")]
-pub fn dock_tab_pill<State, F>(
-    title: &str,
-    is_active: bool,
-    pal: StudioPalette,
-    on_click: F,
-) -> impl WidgetView<State> + use<State, F>
-where
-    State: 'static,
-    F: Fn(&mut State) + Send + Sync + 'static,
-{
-    let bg = if is_active {
-        pal.accent_mint_wash
-    } else {
-        pal.bg_shell
-    };
-    let border = if is_active {
-        pal.accent_mint
-    } else {
-        pal.border_hairline
-    };
-    let fg = if is_active {
-        pal.accent_mint
-    } else {
-        pal.text_secondary
-    };
-    let marker = if is_active {
-        "radio_button_checked"
-    } else {
-        "radio_button_unchecked"
-    };
-    sized_box(button(
-        flex_row((
-            icon::<State>(marker, 12.0, fg),
-            label(title.to_string()).text_size(12.0).color(fg),
-        ))
-        .cross_axis_alignment(CrossAxisAlignment::Center),
-        on_click,
-    ))
-    .padding(2.0)
-    .background_color(bg)
-    .border(border, 1.0)
-    .corner_radius(6.0)
-}
-
-/// Build a compact semantic badge chip (`TEXT`, `RECT`, `SHDR`, `VID`, `AUD`).
-#[cfg(feature = "xilem-ui")]
-pub fn kind_badge_chip<State>(
-    badge: &str,
-    pal: StudioPalette,
-) -> impl WidgetView<State> + use<State>
-where
-    State: 'static,
-{
-    let (fg, bg) = match badge {
-        "TEXT" => (pal.accent_mint, pal.accent_mint_wash),
-        "SHDR" | "WGSL" => (pal.accent_cyan, pal.clip_shader_bg),
-        "VID" | "IMG" => (pal.selection_sky, pal.bg_raised),
-        "AUD" => (Color::from_rgb8(216, 180, 254), pal.clip_audio_bg),
-        "RECT" | "CIRC" | "PATH" => (pal.warning_amber, pal.bg_raised),
-        _ => (pal.text_secondary, pal.bg_raised),
-    };
-    sized_box(
-        label(badge.to_string())
-            .weight(FontWeight::BOLD)
-            .text_size(10.0)
-            .color(fg),
-    )
-    .padding(3.0)
-    .background_color(bg)
-    .border(fg, 1.0)
-    .corner_radius(4.0)
-}
-
-/// Build a collapsible `PropertyPanelFlat` group header with chevron, title, and live summary.
-#[cfg(feature = "xilem-ui")]
-pub fn flat_group_header<State, F>(
-    title: &str,
-    summary: &str,
-    is_open: bool,
-    pal: StudioPalette,
-    on_toggle: F,
-) -> impl WidgetView<State> + use<State, F>
-where
-    State: 'static,
-    F: Fn(&mut State) + Send + Sync + 'static,
-{
-    let chevron = if is_open {
-        "expand_more"
-    } else {
-        "chevron_right"
-    };
-    let fg = if is_open {
-        pal.accent_mint
-    } else {
-        pal.text_secondary
-    };
-    let bg = if is_open {
-        pal.bg_raised
-    } else {
-        pal.bg_surface
-    };
-    flex_row((
-        button(
-            flex_row((
-                icon::<State>(chevron, 14.0, fg),
-                label(title.to_string()).text_size(12.0).color(fg),
-            ))
-            .cross_axis_alignment(CrossAxisAlignment::Center),
-            on_toggle,
-        ),
-        label(summary.to_string())
-            .text_size(11.0)
-            .color(if is_open {
-                pal.accent_mint
-            } else {
-                pal.text_muted
-            }),
-    ))
-    .cross_axis_alignment(CrossAxisAlignment::Center)
-    .padding(6.0)
-    .background_color(bg)
-    .border(pal.border_hairline, 1.0)
-}
-
-/// Wrap a dock panel inside Hyperframes' signature rounded card with a 3px outer shell gutter.
-#[cfg(feature = "xilem-ui")]
-pub fn dock_card_shell<State, V>(
-    inner: V,
-    pal: StudioPalette,
-) -> impl WidgetView<State> + use<State, V>
-where
-    State: 'static,
-    V: WidgetView<State>,
-{
-    sized_box(
-        sized_box(inner)
-            .expand()
-            .background_color(pal.bg_surface)
-            .border(pal.border_strong, 1.0)
-            .corner_radius(10.0),
-    )
-    .expand()
-    .padding(3.0)
-    .background_color(pal.bg_shell)
-}
-
-/// Family name of the bundled Google **Material Symbols Outlined** variable font.
-pub const ICON_FONT: &str = "Material Symbols Outlined";
-
-/// A single Material Symbols icon rendered through the bundled icon font.
-pub fn icon<State>(
-    name: &'static str,
-    size: f32,
-    color: Color,
-) -> impl WidgetView<State> + use<State>
-where
-    State: 'static,
-{
-    label(name).font(ICON_FONT).text_size(size).color(color)
-}
-
-/// An icon-only button.
-pub fn icon_button<State, F>(
-    name: &'static str,
-    size: f32,
-    color: Color,
-    on_click: F,
-) -> impl WidgetView<State> + use<State, F>
-where
-    State: 'static,
-    F: Fn(&mut State) + Send + Sync + 'static,
-{
-    button(icon::<State>(name, size, color), on_click)
-}
-
-/// A button with a Material Symbols icon followed by a text label.
-pub fn icon_text_button<State, F, T>(
-    name: &'static str,
-    text: T,
-    icon_size: f32,
-    color: Color,
-    on_click: F,
-) -> impl WidgetView<State> + use<State, F, T>
-where
-    State: 'static,
-    F: Fn(&mut State) + Send + Sync + 'static,
-    T: Into<ArcStr>,
-{
-    button(
-        flex_row((
-            icon::<State>(name, icon_size, color),
-            label(text).text_size(12.0).color(color),
-        ))
-        .cross_axis_alignment(CrossAxisAlignment::Center),
-        on_click,
-    )
-}
-
-/// A non-interactive icon + text row.
-pub fn icon_text<State, T>(
-    name: &'static str,
-    text: T,
-    icon_size: f32,
-    color: Color,
-) -> impl WidgetView<State> + use<State, T>
-where
-    State: 'static,
-    T: Into<ArcStr>,
-{
-    flex_row((
-        icon::<State>(name, icon_size, color),
-        label(text).text_size(12.0).color(color),
-    ))
-    .cross_axis_alignment(CrossAxisAlignment::Center)
 }
 
 /// Compute simulated stereo L/R audio peak levels in `[0.0, 1.0]` at `current_time`

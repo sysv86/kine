@@ -45,17 +45,29 @@ The default build uses a 100% deterministic software rendering and encoding pipe
 
 ### Launching Kine Studio
 
-```bash
-# Launch via the kine CLI
-cargo run -p kine-cli -- studio
-cargo run -p kine-cli -- studio --scene examples/showcase.ts
+Kine Studio is **GPU-first**: the default features enable the `gpu` pipeline and the
+`auto` backend selects Vulkan/Metal/DX12 when an adapter is present, falling back to the
+deterministic CPU path otherwise. Always use the optimized profile for interactive
+preview — a debug build spends most of its frame budget in unoptimized scene evaluation:
 
-# Or launch the standalone kine-studio binary directly
-cargo run -p kine-studio -- --scene examples/showcase.ts
+```bash
+# Recommended: release build + GPU (also what scripts/studio.sh does)
+cargo run --release -p kine-studio -- --scene examples/hello/scene.ts
+./scripts/studio.sh --scene examples/motion/scene.ts
+
+# Launch via the kine CLI
+cargo run --release -p kine-cli -- studio
+cargo run --release -p kine-cli -- studio --scene examples/hello/scene.ts
+
+# Start with transport already playing (useful for capture/demo)
+cargo run --release -p kine-studio -- --scene examples/hello/scene.ts --play
 
 # Run a headless verification check (for CI or automated agents)
-cargo run -p kine-cli -- studio --headless-check
+cargo run --release -p kine-cli -- studio --headless-check
 ```
+
+The status bar shows the active backend and last rasterization time (`GPU · 5.4ms`).
+CPU is a fallback, not the default. Builds without `gpu` still work and print `CPU`.
 
 ## Workspace Architecture
 

@@ -12,11 +12,18 @@ USAGE:
   kine-studio [--scene <scene.ts|scene.json>]
               [--workspace <dir>]
               [--backend auto|gpu|cpu]
+              [--play]
               [--headless-check]
 "
 }
 
 fn main() -> ExitCode {
+    if cfg!(debug_assertions) {
+        eprintln!(
+            "kine-studio: warning: this is an unoptimized debug build; \
+             preview playback will stutter. Use `cargo run --release` or scripts/studio.sh."
+        );
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{}", usage());
@@ -50,6 +57,10 @@ fn main() -> ExitCode {
             eprintln!("kine-studio: failed to load {scene_path}: {e}");
             return ExitCode::FAILURE;
         }
+    }
+
+    if has_flag("--play") {
+        state.is_playing = true;
     }
 
     if has_flag("--headless-check") {
