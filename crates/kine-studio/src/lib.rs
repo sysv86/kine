@@ -1,18 +1,23 @@
 //! `kine-studio` — Native Rust **Xilem** visual studio, NLE timeline, node
-//! inspector, and AI agent loop synchronized in-process with the Kine engine
-//! across **Linux**, **Windows**, and **macOS**.
+//! inspector, settings dialog, and AI agent loop synchronized in-process with
+//! the Kine engine across **Linux**, **Windows**, and **macOS**.
 
 pub mod agent_tools;
 pub mod catalog;
 pub mod chat;
+#[cfg(feature = "xilem-ui")]
+pub mod custom_widgets;
 pub mod inspector;
 #[cfg(feature = "xilem-ui")]
 pub mod local_portal;
 #[cfg(feature = "xilem-ui")]
 pub mod preview_canvas;
+#[cfg(feature = "xilem-ui")]
+pub mod settings_panel;
 pub mod state;
 pub mod theme;
 pub mod timeline;
+#[cfg(feature = "xilem-ui")]
 pub mod ui;
 
 pub use agent_tools::{
@@ -31,9 +36,12 @@ pub use inspector::{LayerTreeRow, NodeInspectorSnapshot};
 pub use state::{
     LeftDockTab, RenderJobStatus, RenderQueueJob, RightDockTab, StudioError, StudioState, UndoEntry,
 };
-pub use theme::sample_audio_meter_levels;
 #[cfg(feature = "xilem-ui")]
 pub use theme::StudioPalette;
+pub use theme::{
+    sample_audio_meter_levels, AccentPreset, DensityMetrics, SettingsCategory, StudioAnimState,
+    StudioSettings, StudioThemeMode, UiDensity, ViewportChannelMode,
+};
 pub use timeline::{
     generate_ruler_ticks, node_def_badge, node_def_display_label, TimelineKeyframeMarker,
     TimelineTick, TimelineTrack, TimelineTrackKind,
@@ -59,6 +67,9 @@ mod tests {
         assert!(state.inspect_findings.is_empty());
         assert!(state.dark_theme);
         assert!(state.topology_lens_active);
+        assert_eq!(state.settings.theme_mode, StudioThemeMode::GraphiteDark);
+        assert_eq!(state.settings.accent_preset, AccentPreset::KineMint);
+        assert_eq!(state.settings.density, UiDensity::Comfortable);
     }
 
     #[test]
@@ -118,6 +129,60 @@ mod tests {
         state.selected_node = Some(dup_id);
         state.timeline_delete_selected().unwrap();
         assert_eq!(state.node_paths().len(), 7);
+    }
+
+    #[test]
+    fn cascading_tree_collapse_and_multi_section_inspector_work() {
+        let mut state = StudioState::new(None);
+        assert_eq!(state.build_layer_tree_rows().len(), 7);
+
+        // Collapsing root #0 hides its 6 children in the layer tree & timeline
+        state.toggle_node_collapsed(NodeId(0));
+        assert_eq!(state.build_layer_tree_rows().len(), 1);
+
+        // Expanding root #0 restores all children
+        state.toggle_node_collapsed(NodeId(0));
+        assert_eq!(state.build_layer_tree_rows().len(), 7);
+
+        // Multi-open inspector sections
+        assert!(state.is_inspector_section_open("layout"));
+        assert!(state.is_inspector_section_open("style"));
+        state.toggle_inspector_section("layout");
+        assert!(!state.is_inspector_section_open("layout"));
+        state.set_all_inspector_sections(true);
+        assert!(state.is_inspector_section_open("stroke"));
+    }
+
+    #[test]
+    fn settings_persistence_asset_insertion_and_animation_tick_work() {
+        let root = std::env::temp_dir().join(format!("kine-studio-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let mut state = StudioState::new(Some(root.clone()));
+        state.set_theme_mode(StudioThemeMode::CarbonObsidian);
+        state.settings.accent_preset = AccentPreset::CinemaAmber;
+        state.settings.density = UiDensity::Compact;
+        let saved_path = state.save_settings_to_disk().unwrap();
+        assert!(saved_path.exists());
+
+        // Reloading from workspace restores saved settings
+        let reloaded = StudioState::new(Some(root.clone()));
+        assert_eq!(reloaded.settings.theme_mode, StudioThemeMode::CarbonObsidian);
+        assert_eq!(reloaded.settings.accent_preset, AccentPreset::CinemaAmber);
+        assert_eq!(reloaded.settings.density, UiDensity::Compact);
+
+        // Clicking an image asset inserts a node into the scene
+        let before_nodes = state.node_paths().len();
+        state.insert_or_apply_asset(1).unwrap(); // pattern:checkerboard
+        assert_eq!(state.node_paths().len(), before_nodes + 1);
+
+        // UI animation interpolation progresses smoothly
+        state.settings_open = true;
+        state.tick_studio(1.0 / 60.0);
+        assert!(state.anim.settings_modal_t > 0.0);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
