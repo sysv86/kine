@@ -177,8 +177,6 @@ pub struct StudioState {
     pub show_audio_meters: bool,
     pub last_raw_pixmap: RasterPixmap,
     pub last_viewport_pixmap: RasterPixmap,
-    #[cfg(feature = "xilem-ui")]
-    pub frame_image_data: xilem::masonry::peniko::ImageData,
     pub frame_revision: u64,
     /// Wall-clock time of the last preview rasterization, for the status bar.
     pub last_render_ms: f32,
@@ -225,8 +223,6 @@ impl StudioState {
             serde_json::to_string_pretty(&initial_def).unwrap_or_else(|_| "{}".to_string());
 
         let raw_px = RasterPixmap::new(initial_def.width as u16, initial_def.height as u16);
-        #[cfg(feature = "xilem-ui")]
-        let frame_image_data = pixmap_to_xilem_image(&raw_px);
 
         let mut open_sections = BTreeSet::new();
         open_sections.insert("layout".to_string());
@@ -290,8 +286,6 @@ impl StudioState {
             show_audio_meters: true,
             last_raw_pixmap: raw_px.clone(),
             last_viewport_pixmap: raw_px,
-            #[cfg(feature = "xilem-ui")]
-            frame_image_data,
             frame_revision: 0,
             last_render_ms: 0.0,
             inspect_findings: Vec::new(),
@@ -789,10 +783,6 @@ impl StudioState {
             frame_idx,
         )?;
         let viewport_px = self.compose_viewport_overlay(&pixmap);
-        #[cfg(feature = "xilem-ui")]
-        {
-            self.frame_image_data = pixmap_to_xilem_image(&viewport_px);
-        }
         self.last_raw_pixmap = pixmap;
         self.last_viewport_pixmap = viewport_px;
         self.frame_revision = self.frame_revision.wrapping_add(1);
@@ -1468,25 +1458,6 @@ pub(crate) fn node_at_path_mut<'a>(
         cur = cur.children.as_mut()?.get_mut(idx)?;
     }
     Some(cur)
-}
-
-#[cfg(feature = "xilem-ui")]
-pub fn pixmap_to_xilem_image(pixmap: &RasterPixmap) -> xilem::masonry::peniko::ImageData {
-    use std::sync::Arc;
-    use xilem::masonry::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
-    let w = u32::from(pixmap.width());
-    let h = u32::from(pixmap.height());
-    let mut bytes = Vec::with_capacity((w as usize) * (h as usize) * 4);
-    for px in pixmap.data() {
-        bytes.extend_from_slice(&[px.r, px.g, px.b, px.a]);
-    }
-    ImageData {
-        data: Blob::new(Arc::new(bytes)),
-        format: ImageFormat::Rgba8,
-        alpha_type: ImageAlphaType::AlphaPremultiplied,
-        width: w,
-        height: h,
-    }
 }
 
 fn blend_pixel(pixmap: &mut RasterPixmap, x: i32, y: i32, rgba: [u8; 4]) {

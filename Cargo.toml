@@ -11,6 +11,7 @@ members = [
     "crates/kine-mux",
     "crates/kine-platform",
     "crates/kine-server",
+    "crates/kine-session",
     "crates/kine-studio",
     "crates/kine-cli",
 ]
@@ -33,6 +34,7 @@ kine-script = { path = "crates/kine-script" }
 kine-mux = { path = "crates/kine-mux" }
 kine-platform = { path = "crates/kine-platform" }
 kine-server = { path = "crates/kine-server" }
+kine-session = { path = "crates/kine-session" }
 kine-studio = { path = "crates/kine-studio" }
 
 serde = { version = "1.0", features = ["derive"] }

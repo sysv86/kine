@@ -3,7 +3,7 @@ name = "kine-studio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Kine Studio — native Rust Xilem visual editor, NLE timeline, node inspector, and real-time external CLI agent bridge synchronized in-process with the Kine render engine"
+description = "Kine Studio — native Rust Xilem visual editor and NLE desktop UI over kine-session"
 
 [lib]
 name = "kine_studio"
@@ -15,28 +15,18 @@ path = "src/main.rs"
 
 [dependencies]
 kine-core.workspace = true
-kine-text.workspace = true
-kine-shader.workspace = true
-kine-encode.workspace = true
-kine-audio.workspace = true
 kine-render.workspace = true
-kine-script.workspace = true
-kine-mux.workspace = true
-kine-platform.workspace = true
 kine-server.workspace = true
+kine-session.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
-base64.workspace = true
-image.workspace = true
-taffy.workspace = true
 xilem = { workspace = true, optional = true }
 
 [features]
 default = ["xilem-ui", "gpu"]
 # Native Xilem reactive desktop UI (Linux X11/Wayland, Windows DX12/Vulkan, macOS Metal).
 xilem-ui = ["dep:xilem"]
-# Forward GPU rasterization and hardware video encoding features to the in-process engine.
-gpu = ["kine-server/gpu"]
-hwencode = ["kine-server/hwencode"]
-zero-copy = ["kine-server/zero-copy"]
+# Forward GPU rasterization and hardware video encoding features to the in-process session/engine.
+gpu = ["kine-session/gpu", "kine-server/gpu"]
+hwencode = ["kine-session/hwencode", "kine-server/hwencode"]
+zero-copy = ["kine-session/zero-copy", "kine-server/zero-copy"]

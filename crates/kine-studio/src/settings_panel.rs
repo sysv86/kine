@@ -17,7 +17,7 @@
 //! 5. `Keybindings`: Complete reference of studio transport, timeline, viewport, and node shortcuts.
 
 use crate::local_portal::portal;
-use crate::state::StudioState;
+use kine_session::state::StudioState;
 use crate::theme::{
     AccentPreset, SettingsCategory, StudioPalette, StudioThemeMode, UiDensity,
     ViewportChannelMode, ICON_FONT, MONO_FONT, UI_FONT,

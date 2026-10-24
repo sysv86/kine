@@ -11,7 +11,7 @@
 //!   3-state property rows (`Default`, `Modified`, `Keyframed`).
 //! - Full 5-tab Settings Window (`settings_panel.rs`) overlaid via `zstack`.
 
-use crate::catalog::CATALOG_ITEMS;
+use kine_session::catalog::CATALOG_ITEMS;
 use crate::custom_widgets::{
     easing_curve_canvas, timeline_ruler_canvas, track_lane_canvas, EasingCurveSpec, RulerPaintSpec,
     TrackLaneSpec,
@@ -19,12 +19,12 @@ use crate::custom_widgets::{
 use crate::local_portal::portal;
 use crate::preview_canvas::preview;
 use crate::settings_panel::settings_window_overlay;
-use crate::state::{LeftDockTab, RenderJobStatus, RightDockTab, StudioState};
+use kine_session::state::{LeftDockTab, RenderJobStatus, RightDockTab, StudioState};
 use crate::theme::{
     sample_audio_meter_levels, DensityMetrics, StudioPalette, ICON_FONT, MONO_FONT, RULER_H,
     UI_FONT,
 };
-use crate::timeline::{generate_ruler_ticks, TimelineTrackKind};
+use kine_session::timeline::{generate_ruler_ticks, TimelineTrackKind};
 use kine_core::NodeId;
 use kine_render::{FrameFormat, RenderBackend};
 use std::path::Path;
@@ -1245,7 +1245,7 @@ fn preview_pane(state: &mut StudioState, t: &StudioPalette) -> impl WidgetView<S
     .padding(Padding::from_vh(0.0, 8.0));
 
     let stage = sized_box(preview(
-        ImageBrush::new(state.frame_image_data.clone()),
+        ImageBrush::new(crate::theme::pixmap_to_xilem_image(&state.last_viewport_pixmap)),
         t.bg_stage,
         t.border_strong,
     ))
@@ -1812,7 +1812,7 @@ fn timeline_tracks(
 
 #[allow(clippy::too_many_arguments)]
 fn vello_node_track_row(
-    track: &crate::timeline::TimelineTrack,
+    track: &kine_session::timeline::TimelineTrack,
     t: &StudioPalette,
     dm: &DensityMetrics,
     nid: NodeId,

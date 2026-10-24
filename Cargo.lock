@@ -2330,6 +2330,7 @@ dependencies = [
  "kine-render",
  "kine-script",
  "kine-server",
+ "kine-session",
  "kine-shader",
  "kine-studio",
  "serde_json",
@@ -2435,17 +2436,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kine-shader"
-version = "0.1.0"
-dependencies = [
- "naga 30.0.1",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "kine-studio"
+name = "kine-session"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
@@ -2463,6 +2454,32 @@ dependencies = [
  "serde",
  "serde_json",
  "taffy",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "kine-shader"
+version = "0.1.0"
+dependencies = [
+ "naga 30.0.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "kine-studio"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "kine-core",
+ "kine-render",
+ "kine-script",
+ "kine-server",
+ "kine-session",
+ "kine-shader",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "xilem",
 ]
