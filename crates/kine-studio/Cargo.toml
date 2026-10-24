@@ -3,7 +3,7 @@ name = "kine-studio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Kine Studio — native Rust Xilem visual editor, NLE timeline, node inspector, and AI agent studio synchronized in-process with the Kine render engine"
+description = "Kine Studio — native Rust Xilem visual editor, NLE timeline, node inspector, and real-time external CLI agent bridge synchronized in-process with the Kine render engine"
 
 [lib]
 name = "kine_studio"

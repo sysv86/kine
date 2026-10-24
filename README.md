@@ -14,15 +14,15 @@ The default build uses a 100% deterministic software rendering and encoding pipe
 
 ## Kine Studio (`crates/kine-studio`)
 
-`kine-studio` is a full-featured visual composition editor, NLE timeline, node/shader inspector, and AI agent studio inspired by **Hyperframes Studio**, written in pure Rust on **Xilem `0.4.0`** (Linebender's reactive UI architecture built on `masonry`, `vello`, `peniko`, `parley`, and `winit`).
+`kine-studio` is a full-featured visual composition editor, NLE timeline, node/shader inspector, and real-time CLI agent bridge studio inspired by **Hyperframes Studio**, written in pure Rust on **Xilem `0.4.0`** (Linebender's reactive UI architecture built on `masonry`, `vello`, `peniko`, `parley`, and `winit`).
 
 ### Key Studio Capabilities
 
 1. **Single-Process Engine Synchronization**:
    - `StudioState` owns `kine_server::Engine`, `SceneHandle`, and the authored `kine_script::SceneDef` AST **in the same OS process**.
-   - Every edit in the Design Inspector, NLE Timeline, Code Editor, or AI Agent Chat mutates `SceneDef` inside a checkpointed undo/redo transaction, rebuilds `kine_core::Scene` in-memory, evaluates animations & layout at the current playhead timestamp, and converts `vello_cpu::Pixmap` directly into `xilem::masonry::peniko::ImageData` (`AlphaPremultiplied` RGBA8) with zero IPC or process duplication.
+   - Every edit in the Design Inspector, NLE Timeline, Code Editor, or External CLI Agent Bridge mutates `SceneDef` inside a checkpointed undo/redo transaction, rebuilds `kine_core::Scene` in-memory, evaluates animations & layout at the current playhead timestamp, and converts `vello_cpu::Pixmap` directly into `xilem::masonry::peniko::ImageData` (`AlphaPremultiplied` RGBA8) with zero IPC or process duplication.
 2. **Hyperframes-Style 4-Zone Workspace**:
-   - **Header Bar**: Active composition switcher, live static inspection badge, `Backend` selector (`AUTO`/`CPU`/`GPU`), `Capture PNG`, `Ask AI Agent` prompt builder, Dock visibility toggle, and one-click `Render Export`.
+   - **Header Bar**: Active composition switcher, live static inspection badge, `Backend` selector (`AUTO`/`CPU`/`GPU`), `Capture PNG`, `CLI :7701` live bridge toggle, Dock visibility toggle, and one-click `Render Export`.
    - **Left Dock**:
      - `Compositions`: Built-in starter compositions + automatic discovery of `.ts` and `.json` scenes in `examples/`.
      - `Assets`: Fonts (`JetBrains Mono`), procedural patterns (`pattern:checkerboard`), procedural video clips (`video:testbars`), synthesized DSP audio beds (`synth:...`), and WGSL shader assets.
@@ -37,10 +37,13 @@ The default build uses a 100% deterministic software rendering and encoding pipe
    - **Right Dock**:
      - `Design` Inspector: Computed bounding box (`X`, `Y`, `W`, `H`), canvas alignment buttons, position/size nudges, opacity slider, rotation & scale steppers, hex color & swatch picker, corner radius, typography controls, and animation track easing curves (`linear`, `easeOut`, `easeOutCubic`, `spring`).
      - `Layers` Tree: Hierarchical Z-ordered scene graph with visibility toggles (`👁`/`🚫`) and sibling Z-order reordering (`↑`/`↓`).
-     - `AI Agent` Chat & WebMCP Tool Loop: Interactive chat panel + **"Kine Studio element edit request v1"** prompt generator (`build_element_agent_prompt`) backed by 12 verified in-process `studio_*` tools:
-       - `studio_look`, `studio_select`, `studio_seek`, `studio_frame`, `studio_inspect`
-       - `studio_set_text`, `studio_set_style`, `studio_transform` (with read-back bounding-box verification)
-       - `studio_add_animation`, `studio_update_animation`, `studio_add_keyframe`, `studio_delete_animation`
+   - **Real-Time External CLI Agent Bridge (`crates/kine-studio/src/bridge.rs`)**:
+     - Kine Studio deliberately omits any built-in LLM chat wrapper. External CLI agents (Claude Code / **Claude Opus 5.5**, Codex / **GPT-6 Astra**, Gemini CLI / **Gemini Argon 4**, OpenCode) run in a separate terminal or window and control Kine Studio in real time over a bidirectional TCP bridge (`127.0.0.1:7701`, auto-discovered via `.kine-studio-bridge.json`) or via live file hot-reloading (`SceneFileWatcher`):
+       - **State, Selection & Inspection**: `studio_status`, `studio_selection`, `studio_look`, `studio_tree`, `studio_timeline`, `studio_inspect`
+       - **Node Hierarchy & Alignment**: `studio_add_node`, `studio_delete_node`, `studio_duplicate_node`, `studio_reorder_node`, `studio_toggle_visibility`, `studio_align_node`
+       - **Content, Style, Transform, WGSL Shaders & Audio**: `studio_set_text`, `studio_set_style`, `studio_transform`, `studio_set_shader`, `studio_audio`
+       - **Timeline, Keyframes & Transport**: `studio_seek`, `studio_frame`, `studio_transport`, `studio_resize_canvas`, `studio_add_animation`, `studio_update_animation`, `studio_add_keyframe`, `studio_delete_keyframe`, `studio_delete_animation`, `studio_shift_time`, `studio_split`
+       - **History, Scene I/O, Export & Atomic Batching**: `studio_undo`, `studio_redo`, `studio_history`, `studio_load_scene`, `studio_reload`, `studio_apply_source`, `studio_save_scene`, `studio_switch_composition`, `studio_new_composition`, `studio_export`, `studio_batch`
      - `Renders` Queue: In-process multi-format export (`MP4`, `MKV`, `WebM`, `GIF`, `PNG`) with frame count, byte size, and output path history.
 
 ### Launching Kine Studio
@@ -64,6 +67,15 @@ cargo run --release -p kine-studio -- --scene examples/hello/scene.ts --play
 
 # Run a headless verification check (for CI or automated agents)
 cargo run --release -p kine-cli -- studio --headless-check
+
+# Control a running Kine Studio window in real time from an external CLI agent
+kine agent status
+kine agent selection --prompt
+kine agent tree
+kine agent set-text --node 4 --text "LIVE FROM CLI AGENT"
+kine agent transform --node 2 --dx 24 --dy -12 --scale 1.1
+kine agent animate --node 3 --prop rotation --from 0 --to 360 --start 0 --end 2.0 --easing easeInOutCubic
+kine agent watch
 ```
 
 The status bar shows the active backend and last rasterization time (`GPU · 5.4ms`).
@@ -151,5 +163,5 @@ kine modules --dir ./project
 - `crates/kine-script` — TypeScript stripping (`oxc`), embedded QuickJS (`rquickjs`) evaluation, and JSON/TS scene authoring schema (`SceneDef`, `NodeDef`).
 - `crates/kine-platform` — Host OS detection (`Linux`, `Windows`, `macOS`) and output path resolution (`KINE_OUTPUT_DIR`).
 - `crates/kine-server` — In-process `Engine` API, static scene inspector, snapshot pixel-diff gate, and newline-delimited JSON-RPC TCP server.
-- `crates/kine-studio` — Native Rust **Xilem** GUI studio (`StudioState`, NLE timeline, node/shader inspector, and `studio_*` AI agent tools) living in-process with `kine-server::Engine`.
-- `crates/kine-cli` — Non-interactive `kine` command-line binary (plus `kine studio` launcher).
+- `crates/kine-studio` — Native Rust **Xilem** GUI studio (`StudioState`, NLE timeline, node/shader inspector, live `StudioBridgeServer`, `SceneFileWatcher`, and 34 `studio_*` agent bridge tools) living in-process with `kine-server::Engine`.
+- `crates/kine-cli` — Non-interactive `kine` command-line binary, `kine studio` launcher, and `kine agent` real-time CLI bridge controller.

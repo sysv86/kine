@@ -77,15 +77,15 @@ All measurements snap to a `4px` spatial grid with three user-selectable density
 | Cascade Indent Step (`cascade_indent`) | `12px` | `14px` | `18px` |
 
 ### 4.1 5-Zone Resizable Shell Architecture
-1. **Top Command Header (`40px`)**: Brand mark, active composition breadcrumb switcher, static analyzer findings badge, Quick Action cluster (`New Comp`, `Capture PNG`, `Backend Cycle`, `Left Dock Toggle`, `Right Inspector Toggle`, `Theme Cycle`, `Settings (⚙)`, `Ask AI`, `Export`).
+1. **Top Command Header (`40px`)**: Brand mark, active composition breadcrumb switcher, static analyzer findings badge, Quick Action cluster (`New Comp`, `Capture PNG`, `Backend Cycle`, `Left Dock Toggle`, `Right Inspector Toggle`, `Theme Cycle`, `CLI Bridge (:7701)`, `Settings (⚙)`, `Export`).
 2. **Left Navigator Dock**: Segmented pill strip (`Comps`, `Assets`, `Code`, `Catalog`) with quick filter/action header and scrollable body.
 3. **Center Split Workspace**:
    - **Upper Preview Stage**: Viewport toolbar (composition resolution pill, selected node path, channel mode `RGB`/`R`/`G`/`B`/`A`, Grid, Safe Guides, Bounding Box, Topology Lens, Zoom `25%–400%` + `Fit`), interactive `PreviewCanvas` (click-to-select + drag-to-move node in canvas), and full Transport Bar (timecode mode toggle, transport buttons, scrub slider, volume slider, stereo peak meters).
    - **Lower NLE Timeline**: Timeline toolbar (Undo/Redo with badge counts, Snap, Ripple, Auto-KF, Prev/Add/Next Keyframe, Time Shift `-0.1s`/`+0.1s`, Split, Duplicate, Delete, Add Track menu, Zoom slider) + synchronized Track Header Gutter and custom Vello-rendered **`TimelineCanvas`** (pixel-exact ruler ticks, playhead line with top handle & soft glow, clip blocks with 15px label band, diamond keyframe markers, click/drag playhead scrubbing).
-4. **Right Inspector Dock**: Segmented pill strip (`Design`, `Layers`, `Agent`, `Renders`) with cascading collapsible property cards (`Layout & Geometry`, `2D Transform`, `Appearance & Fill`, `Stroke & Drop Shadow`, `Typography`, `Keyframes & Motion`, `WGSL Shaders & Uniforms`, `Audio Bed DSP`).
+4. **Right Inspector Dock**: Segmented pill strip (`Design`, `Layers`, `Renders`) with cascading collapsible property cards (`Layout & Geometry`, `2D Transform`, `Appearance & Fill`, `Stroke & Drop Shadow`, `Typography`, `Keyframes & Motion`, `WGSL Shaders & Uniforms`, `Audio Bed DSP`).
 5. **Modal Overlay Layer (`ZStack` / Workspace View)**:
    - **Settings Window (`SettingsTab`)**: 5-tab configuration dialog (`Appearance & UI`, `Editor & Viewport`, `Timeline & Playback`, `Engine & Export`, `Keyboard Shortcuts`) with instant live preview and JSON persistence (`studio-settings.json`).
-   - **Ask AI Agent Modal**: Structured element prompt preview (`Kine Studio element edit request v1`) and direct execution.
+   - **External CLI Agent Bridge (`127.0.0.1:7701`)**: No in-app chat wrapper. External CLI agents (Claude Opus 5.5, GPT-6 Astra, Gemini Argon 4) run in a separate terminal/window and mutate or inspect `StudioState` in real time over the TCP bridge (`kine agent ...`) or via watched disk files.
 
 ---
 

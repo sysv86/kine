@@ -38,7 +38,13 @@ echo "==> [6/7] Rendering short MP4 animation"
 "$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/clip.mp4" --frames 6 --fps 30
 test -s "$OUT_DIR/clip.mp4"
 
-echo "==> [7/7] Verifying in-process Kine Studio state & studio_look tool"
+echo "==> [7/8] Verifying in-process Kine Studio state & studio_look tool"
 "$KINE_BIN" studio --scene "$OUT_DIR/starter.json" --headless-check
+
+echo "==> [8/8] Verifying kine agent CLI bridge tools & scene persistence"
+"$KINE_BIN" agent schema > "$OUT_DIR/agent-schema.json"
+test -s "$OUT_DIR/agent-schema.json"
+"$KINE_BIN" agent set-text --scene "$OUT_DIR/starter.json" --node 2 --text "AGENT BRIDGE OK" --save
+grep -q "AGENT BRIDGE OK" "$OUT_DIR/starter.json"
 
 echo "==> Smoke verification passed."
