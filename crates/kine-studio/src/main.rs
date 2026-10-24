@@ -6,12 +6,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn usage() -> &'static str {
-    "kine-studio — Native Rust Xilem visual editor, NLE timeline & AI Agent Studio for Kine
+    "kine-studio — Native Rust Xilem visual editor, NLE timeline & Real-Time CLI Agent Bridge for Kine
 
 USAGE:
   kine-studio [--scene <scene.ts|scene.json>]
               [--workspace <dir>]
               [--backend auto|gpu|cpu]
+              [--bridge <127.0.0.1:7701>]
+              [--no-bridge]
+              [--auto-save]
               [--play]
               [--headless-check]
 "
@@ -59,6 +62,10 @@ fn main() -> ExitCode {
         }
     }
 
+    if has_flag("--auto-save") {
+        state.settings.auto_save_scene = true;
+    }
+
     if has_flag("--play") {
         state.is_playing = true;
     }
@@ -84,6 +91,14 @@ fn main() -> ExitCode {
         } else {
             ExitCode::FAILURE
         };
+    }
+
+    if !has_flag("--no-bridge") {
+        let explicit_addr = flag("--bridge");
+        match state.start_bridge_server(explicit_addr.as_deref()) {
+            Ok(bound) => eprintln!("kine-studio: CLI agent bridge listening on {bound}"),
+            Err(e) => eprintln!("kine-studio: warning: could not bind CLI bridge: {e}"),
+        }
     }
 
     #[cfg(feature = "xilem-ui")]

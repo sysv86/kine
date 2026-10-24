@@ -44,7 +44,27 @@ USAGE:
   kine snapshot   --scene <scene.json> --against <golden.png> [--frame N] [--threshold R]
                   [--backend auto|gpu|cpu]
   kine studio     [--scene <scene>] [--workspace <dir>] [--backend auto|gpu|cpu]
-                  [--headless-check]          launch the native Xilem Kine Studio GUI
+                  [--bridge <127.0.0.1:7701>] [--no-bridge] [--auto-save] [--play]
+                  [--selection] [--context] [--headless-check]
+                                              launch Kine Studio or query live selection/context
+  kine agent      <subcommand> [options]      control a live Kine Studio window (or --scene file)
+                  status | context | selection [--prompt] | look [--out <png>] |
+                  tree | timeline | inspect [--node <id>] | select [--node <id>|--clear] |
+                  seek --time <s> | frame --frame <n> | play | pause | toggle | stop |
+                  step [--delta <n>] | transport [...] | resize --width <w> --height <h> |
+                  add [...] | delete [--node <id>] | duplicate [--node <id>] |
+                  reorder [--node <id>] --delta <n> | visibility [--node <id>] |
+                  align [--node <id>] [--h <mode>] [--v <mode>] |
+                  set-text [--node <id>] --text <str> | set-style [--node <id>] [...] |
+                  transform [--node <id>] [...] | shader [--node <id>] [...] |
+                  audio [...] | animate [--node <id>] --prop <p> [...] |
+                  keyframe [--node <id>] --prop <p> --time <s> --value <v> |
+                  delete-keyframe [--node <id>] --prop <p> --time <s> |
+                  delete-anim [--node <id>] --prop <p> | shift [--node <id>] --delta <s> |
+                  split [--node <id>] | undo | redo | history | load --scene <path> |
+                  reload | apply (--file <f>|--inline <s>) | save [--out <path>] |
+                  export [--format <fmt>] [--out <path>] | call --tool <name> [--args <json>] |
+                  batch (--file <f>|--inline <json>) | schema | watch
   kine serve      [--listen 127.0.0.1:7700]
 "
 }
@@ -726,6 +746,28 @@ fn main() -> ExitCode {
             let workspace = flag("--workspace")
                 .map(PathBuf::from)
                 .or_else(|| std::env::current_dir().ok());
+
+            if has_flag("--selection") || has_flag("--context") {
+                let addr = flag("--bridge")
+                    .or_else(|| flag("--addr"))
+                    .unwrap_or_else(|| kine_studio::discover_bridge_addr(workspace.as_deref()));
+                let tool = if has_flag("--selection") {
+                    "studio_selection"
+                } else {
+                    "studio_status"
+                };
+                match kine_studio::bridge_call(&addr, tool, serde_json::json!({})) {
+                    Ok(res) => {
+                        println!("{}", serde_json::to_string_pretty(&res).unwrap());
+                        return if res.ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+                    }
+                    Err(e) => {
+                        eprintln!("studio bridge error: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+
             let mut studio_state = kine_studio::StudioState::new(workspace);
             studio_state.engine.set_backend(engine.backend());
             let _ = studio_state.render_current_frame();
@@ -735,6 +777,13 @@ fn main() -> ExitCode {
                     eprintln!("studio load error ({scene_path}): {e}");
                     return ExitCode::FAILURE;
                 }
+            }
+
+            if has_flag("--auto-save") {
+                studio_state.settings.auto_save_scene = true;
+            }
+            if has_flag("--play") {
+                studio_state.is_playing = true;
             }
 
             if has_flag("--headless-check") {
@@ -760,6 +809,14 @@ fn main() -> ExitCode {
                 };
             }
 
+            if !has_flag("--no-bridge") {
+                let explicit_addr = flag("--bridge");
+                match studio_state.start_bridge_server(explicit_addr.as_deref()) {
+                    Ok(bound) => eprintln!("kine studio: CLI agent bridge listening on {bound}"),
+                    Err(e) => eprintln!("kine studio: warning: could not bind CLI bridge: {e}"),
+                }
+            }
+
             #[cfg(feature = "studio-ui")]
             {
                 match kine_studio::run_studio(studio_state) {
@@ -776,6 +833,8 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+
+        "agent" | "bridge" => run_agent_cli(&args[1..], engine.backend()),
 
         "serve" => {
             let addr = flag_or("--listen", "127.0.0.1:7700");
@@ -911,4 +970,611 @@ fn starter_scene_json() -> String {
         }
     });
     serde_json::to_string_pretty(&def).unwrap()
+}
+
+
+fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
+    let subcmd = sub_args.first().map(String::as_str).unwrap_or("status");
+    if subcmd == "--help" || subcmd == "-h" || subcmd == "help" {
+        print!("{}", usage());
+        return ExitCode::SUCCESS;
+    }
+
+    let flag = |name: &str| -> Option<String> {
+        sub_args
+            .iter()
+            .position(|a| a == name)
+            .and_then(|i| sub_args.get(i + 1))
+            .cloned()
+    };
+    let has_flag = |name: &str| -> bool { sub_args.iter().any(|a| a == name) };
+    let flag_f64 = |name: &str| -> Option<f64> { flag(name).and_then(|s| s.parse::<f64>().ok()) };
+    let flag_u64 = |name: &str| -> Option<u64> {
+        flag(name).and_then(|s| s.trim_start_matches('#').parse::<u64>().ok())
+    };
+    let flag_i64 = |name: &str| -> Option<i64> { flag(name).and_then(|s| s.parse::<i64>().ok()) };
+    let flag_bool = |name: &str| -> Option<bool> {
+        match flag(name).as_deref() {
+            Some("true" | "1" | "yes" | "on") => Some(true),
+            Some("false" | "0" | "no" | "off") => Some(false),
+            _ => {
+                if has_flag(name) {
+                    Some(true)
+                } else {
+                    None
+                }
+            }
+        }
+    };
+
+    let workspace = flag("--workspace")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok());
+    let addr = flag("--addr")
+        .or_else(|| flag("--bridge"))
+        .unwrap_or_else(|| kine_studio::discover_bridge_addr(workspace.as_deref()));
+
+    if subcmd == "schema" || subcmd == "tools" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&kine_studio::agent_tools_json_schema()).unwrap()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    if subcmd == "watch" || subcmd == "subscribe" {
+        eprintln!("watching live Kine Studio events on {addr} (Ctrl-C to stop)...");
+        match kine_studio::bridge_watch(&addr, |ev| {
+            println!("{}", serde_json::to_string(&ev).unwrap_or_default());
+            true
+        }) {
+            Ok(()) => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("agent watch error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    let node_id_opt = flag_u64("--node").or_else(|| flag_u64("--id"));
+    let undo_label_opt = flag("--undo-label").or_else(|| flag("--reason"));
+
+    let mut map = serde_json::Map::new();
+    if let Some(nid) = node_id_opt {
+        map.insert("nodeId".to_string(), serde_json::json!(nid));
+    }
+    if let Some(lbl) = undo_label_opt {
+        map.insert("undoLabel".to_string(), serde_json::json!(lbl));
+    }
+
+    let tool_name: String = match subcmd {
+        "status" | "context" => "studio_status".to_string(),
+        "selection" => {
+            if let Some(req) = flag("--request").or_else(|| flag("--prompt")) {
+                map.insert("request".to_string(), serde_json::json!(req));
+            }
+            "studio_selection".to_string()
+        }
+        "look" => {
+            if let Some(out) = flag("--out") {
+                map.insert("outPath".to_string(), serde_json::json!(out));
+            }
+            "studio_look".to_string()
+        }
+        "tree" | "layers" => "studio_tree".to_string(),
+        "timeline" => "studio_timeline".to_string(),
+        "inspect" => "studio_inspect".to_string(),
+        "select" => {
+            if has_flag("--clear") {
+                map.insert("clear".to_string(), serde_json::json!(true));
+            }
+            "studio_select".to_string()
+        }
+        "seek" => {
+            if let Some(t) = flag_f64("--time").or_else(|| flag_f64("--sec")) {
+                map.insert("time".to_string(), serde_json::json!(t));
+            }
+            "studio_seek".to_string()
+        }
+        "frame" => {
+            if let Some(f) = flag_u64("--frame") {
+                map.insert("frame".to_string(), serde_json::json!(f));
+            }
+            "studio_frame".to_string()
+        }
+        "play" | "pause" | "toggle" | "stop" => {
+            map.insert("action".to_string(), serde_json::json!(subcmd));
+            "studio_transport".to_string()
+        }
+        "step" => {
+            map.insert("action".to_string(), serde_json::json!("step"));
+            if let Some(d) = flag_i64("--delta").or_else(|| flag_i64("--frames")) {
+                map.insert("deltaFrames".to_string(), serde_json::json!(d));
+            }
+            "studio_transport".to_string()
+        }
+        "transport" => {
+            if let Some(act) = flag("--action") {
+                map.insert("action".to_string(), serde_json::json!(act));
+            }
+            if let Some(fps) = flag_f64("--fps") {
+                map.insert("fps".to_string(), serde_json::json!(fps));
+            }
+            if let Some(rate) = flag_f64("--rate") {
+                map.insert("rate".to_string(), serde_json::json!(rate));
+            }
+            if let Some(lp) = flag_bool("--loop") {
+                map.insert("loop".to_string(), serde_json::json!(lp));
+            }
+            if let Some(m) = flag_bool("--muted") {
+                map.insert("muted".to_string(), serde_json::json!(m));
+            }
+            if let Some(v) = flag_f64("--volume") {
+                map.insert("volume".to_string(), serde_json::json!(v));
+            }
+            if let Some(s) = flag_bool("--snap") {
+                map.insert("snap".to_string(), serde_json::json!(s));
+            }
+            if let Some(r) = flag_bool("--ripple") {
+                map.insert("ripple".to_string(), serde_json::json!(r));
+            }
+            "studio_transport".to_string()
+        }
+        "resize" => {
+            if let Some(w) = flag_u64("--width") {
+                map.insert("width".to_string(), serde_json::json!(w));
+            }
+            if let Some(h) = flag_u64("--height") {
+                map.insert("height".to_string(), serde_json::json!(h));
+            }
+            "studio_resize_canvas".to_string()
+        }
+        "add" | "add-node" => {
+            if let Some(raw_json) = flag("--json") {
+                match serde_json::from_str::<serde_json::Value>(&raw_json) {
+                    Ok(v) => {
+                        map.insert("node".to_string(), v);
+                    }
+                    Err(e) => {
+                        eprintln!("invalid --json for add: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            if let Some(cat) = flag("--catalog").or_else(|| flag("--preset")) {
+                map.insert("catalogId".to_string(), serde_json::json!(cat));
+            }
+            if let Some(m) = flag("--module") {
+                map.insert("module".to_string(), serde_json::json!(m));
+            }
+            if let Some(props_str) = flag("--props") {
+                if let Ok(p) = serde_json::from_str::<serde_json::Value>(&props_str) {
+                    map.insert("props".to_string(), p);
+                }
+            }
+            if let Some(parent) = flag_u64("--parent") {
+                map.insert("parentId".to_string(), serde_json::json!(parent));
+            }
+            if let Some(idx) = flag_u64("--index") {
+                map.insert("index".to_string(), serde_json::json!(idx));
+            }
+            if let Some(k) = flag("--kind") {
+                map.insert("kind".to_string(), serde_json::json!(k));
+            }
+            if let Some(t) = flag("--text").or_else(|| flag("--content")) {
+                map.insert("text".to_string(), serde_json::json!(t));
+            }
+            if let Some(f) = flag("--fill") {
+                map.insert("fill".to_string(), serde_json::json!(f));
+            }
+            if let Some(c) = flag("--color") {
+                map.insert("color".to_string(), serde_json::json!(c));
+            }
+            if let Some(x) = flag_f64("--x") {
+                map.insert("x".to_string(), serde_json::json!(x));
+            }
+            if let Some(y) = flag_f64("--y") {
+                map.insert("y".to_string(), serde_json::json!(y));
+            }
+            if let Some(w) = flag_f64("--width") {
+                map.insert("width".to_string(), serde_json::json!(w));
+            }
+            if let Some(h) = flag_f64("--height") {
+                map.insert("height".to_string(), serde_json::json!(h));
+            }
+            if let Some(r) = flag_f64("--radius") {
+                map.insert("radius".to_string(), serde_json::json!(r));
+            }
+            if let Some(cr) = flag_f64("--corner-radius") {
+                map.insert("cornerRadius".to_string(), serde_json::json!(cr));
+            }
+            if let Some(op) = flag_f64("--opacity") {
+                map.insert("opacity".to_string(), serde_json::json!(op));
+            }
+            if let Some(fs) = flag_f64("--font-size") {
+                map.insert("fontSize".to_string(), serde_json::json!(fs));
+            }
+            if let Some(src_uri) = flag("--src") {
+                map.insert("src".to_string(), serde_json::json!(src_uri));
+            }
+            if let Some(sh) = flag("--shader") {
+                map.insert("shader".to_string(), serde_json::json!(sh));
+            }
+            if let Some(d) = flag("--d") {
+                map.insert("d".to_string(), serde_json::json!(d));
+            }
+            "studio_add_node".to_string()
+        }
+        "delete" | "delete-node" => "studio_delete_node".to_string(),
+        "duplicate" | "duplicate-node" => "studio_duplicate_node".to_string(),
+        "reorder" => {
+            if let Some(d) = flag_i64("--delta") {
+                map.insert("delta".to_string(), serde_json::json!(d));
+            }
+            "studio_reorder_node".to_string()
+        }
+        "visibility" => {
+            if let Some(v) = flag_bool("--visible") {
+                map.insert("visible".to_string(), serde_json::json!(v));
+            }
+            "studio_toggle_visibility".to_string()
+        }
+        "align" => {
+            if let Some(h) = flag("--h").or_else(|| flag("--horizontal")) {
+                map.insert("horizontal".to_string(), serde_json::json!(h));
+            }
+            if let Some(v) = flag("--v").or_else(|| flag("--vertical")) {
+                map.insert("vertical".to_string(), serde_json::json!(v));
+            }
+            "studio_align_node".to_string()
+        }
+        "set-text" => {
+            if let Some(t) = flag("--text").or_else(|| flag("--content")) {
+                map.insert("text".to_string(), serde_json::json!(t));
+            }
+            "studio_set_text".to_string()
+        }
+        "set-style" | "style" => {
+            let mut changes = serde_json::Map::new();
+            if let Some(raw_json) = flag("--json") {
+                match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_json) {
+                    Ok(parsed) => changes.extend(parsed),
+                    Err(e) => {
+                        eprintln!("invalid --json for set-style: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            if let Some(v) = flag("--fill") {
+                changes.insert("fill".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag("--color") {
+                changes.insert("color".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_f64("--opacity") {
+                changes.insert("opacity".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_f64("--corner-radius") {
+                changes.insert("cornerRadius".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_f64("--radius") {
+                changes.insert("radius".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag("--stroke-color") {
+                changes.insert("strokeColor".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_f64("--stroke-width") {
+                changes.insert("strokeWidth".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag("--shadow-color") {
+                changes.insert("shadowColor".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_f64("--shadow-blur") {
+                changes.insert("shadowBlur".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag("--font-family") {
+                changes.insert("fontFamily".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_f64("--font-size") {
+                changes.insert("fontSize".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag_u64("--font-weight") {
+                changes.insert("fontWeight".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag("--align") {
+                changes.insert("align".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = flag("--blend") {
+                changes.insert("blend".to_string(), serde_json::json!(v));
+            }
+            map.insert("changes".to_string(), serde_json::Value::Object(changes));
+            "studio_set_style".to_string()
+        }
+        "transform" => {
+            for (cli_flag, key) in [
+                ("--x", "x"),
+                ("--y", "y"),
+                ("--width", "width"),
+                ("--height", "height"),
+                ("--tx", "translateX"),
+                ("--ty", "translateY"),
+                ("--scale", "scale"),
+                ("--scale-x", "scaleX"),
+                ("--scale-y", "scaleY"),
+                ("--rotation", "rotation"),
+                ("--dx", "dx"),
+                ("--dy", "dy"),
+                ("--dw", "dw"),
+                ("--dh", "dh"),
+                ("--dtx", "dtx"),
+                ("--dty", "dty"),
+                ("--dscale", "dscale"),
+                ("--drot", "drot"),
+            ] {
+                if let Some(val) = flag_f64(cli_flag) {
+                    map.insert(key.to_string(), serde_json::json!(val));
+                }
+            }
+            "studio_transform".to_string()
+        }
+        "shader" => {
+            if let Some(preset) = flag("--preset") {
+                map.insert("preset".to_string(), serde_json::json!(preset));
+            } else if let Some(file) = flag("--file") {
+                map.insert("shader".to_string(), serde_json::json!(read_file(&file)));
+            } else if let Some(inline) = flag("--inline").or_else(|| flag("--shader")) {
+                map.insert("shader".to_string(), serde_json::json!(inline));
+            }
+            if let Some(b) = flag("--blend") {
+                map.insert("blend".to_string(), serde_json::json!(b));
+            }
+            if let Some(u_str) = flag("--uniforms") {
+                if let Ok(u_val) = serde_json::from_str::<serde_json::Value>(&u_str) {
+                    map.insert("uniforms".to_string(), u_val);
+                }
+            }
+            "studio_set_shader".to_string()
+        }
+        "audio" => {
+            if let Some(act) = flag("--action") {
+                map.insert("action".to_string(), serde_json::json!(act));
+            }
+            if let Some(idx) = flag_u64("--index").or_else(|| flag_u64("--track")) {
+                map.insert("trackIndex".to_string(), serde_json::json!(idx));
+            }
+            if let Some(src_uri) = flag("--src") {
+                map.insert("src".to_string(), serde_json::json!(src_uri));
+            }
+            if let Some(g) = flag_f64("--gain-db") {
+                map.insert("gainDb".to_string(), serde_json::json!(g));
+            }
+            if let Some(p) = flag_f64("--pan") {
+                map.insert("pan".to_string(), serde_json::json!(p));
+            }
+            if let Some(s) = flag_f64("--start") {
+                map.insert("start".to_string(), serde_json::json!(s));
+            }
+            if let Some(te) = flag_f64("--trim-end") {
+                map.insert("trimEnd".to_string(), serde_json::json!(te));
+            }
+            if let Some(fi) = flag_f64("--fade-in") {
+                map.insert("fadeIn".to_string(), serde_json::json!(fi));
+            }
+            if let Some(fo) = flag_f64("--fade-out") {
+                map.insert("fadeOut".to_string(), serde_json::json!(fo));
+            }
+            if let Some(m) = flag_bool("--muted") {
+                map.insert("muted".to_string(), serde_json::json!(m));
+            }
+            "studio_audio".to_string()
+        }
+        "animate" | "add-anim" | "update-anim" => {
+            if let Some(p) = flag("--prop").or_else(|| flag("--property")) {
+                map.insert("property".to_string(), serde_json::json!(p));
+            }
+            if let Some(f) = flag_f64("--from") {
+                map.insert("from".to_string(), serde_json::json!(f));
+            }
+            if let Some(t) = flag_f64("--to") {
+                map.insert("to".to_string(), serde_json::json!(t));
+            }
+            if let Some(s) = flag_f64("--start") {
+                map.insert("start".to_string(), serde_json::json!(s));
+            }
+            if let Some(e) = flag_f64("--end") {
+                map.insert("end".to_string(), serde_json::json!(e));
+            }
+            if let Some(ease) = flag("--easing") {
+                map.insert("easing".to_string(), serde_json::json!(ease));
+            }
+            "studio_add_animation".to_string()
+        }
+        "keyframe" | "add-keyframe" => {
+            if let Some(p) = flag("--prop").or_else(|| flag("--property")) {
+                map.insert("property".to_string(), serde_json::json!(p));
+            }
+            if let Some(t) = flag_f64("--time") {
+                map.insert("time".to_string(), serde_json::json!(t));
+            }
+            if let Some(v) = flag_f64("--value") {
+                map.insert("value".to_string(), serde_json::json!(v));
+            }
+            if let Some(ease) = flag("--easing") {
+                map.insert("easing".to_string(), serde_json::json!(ease));
+            }
+            "studio_add_keyframe".to_string()
+        }
+        "delete-keyframe" => {
+            if let Some(p) = flag("--prop").or_else(|| flag("--property")) {
+                map.insert("property".to_string(), serde_json::json!(p));
+            }
+            if let Some(t) = flag_f64("--time") {
+                map.insert("time".to_string(), serde_json::json!(t));
+            }
+            "studio_delete_keyframe".to_string()
+        }
+        "delete-anim" | "delete-animation" => {
+            if let Some(p) = flag("--prop").or_else(|| flag("--property")) {
+                map.insert("property".to_string(), serde_json::json!(p));
+            }
+            "studio_delete_animation".to_string()
+        }
+        "shift" => {
+            if let Some(d) = flag_f64("--delta") {
+                map.insert("delta".to_string(), serde_json::json!(d));
+            }
+            if let Some(r) = flag_bool("--ripple") {
+                map.insert("ripple".to_string(), serde_json::json!(r));
+            }
+            "studio_shift_time".to_string()
+        }
+        "split" => {
+            if let Some(t) = flag_f64("--time") {
+                map.insert("time".to_string(), serde_json::json!(t));
+            }
+            "studio_split".to_string()
+        }
+        "undo" => "studio_undo".to_string(),
+        "redo" => "studio_redo".to_string(),
+        "history" => "studio_history".to_string(),
+        "load" => {
+            if let Some(p) = flag("--scene").or_else(|| flag("--path")) {
+                map.insert("path".to_string(), serde_json::json!(p));
+            }
+            "studio_load_scene".to_string()
+        }
+        "reload" => "studio_reload".to_string(),
+        "apply" => {
+            let source = match (flag("--file"), flag("--inline")) {
+                (Some(path), _) => read_file(&path),
+                (None, Some(code)) => code,
+                _ => {
+                    eprintln!("agent apply requires --file <scene.ts|json> or --inline <source>");
+                    return ExitCode::FAILURE;
+                }
+            };
+            map.insert("source".to_string(), serde_json::json!(source));
+            "studio_apply_source".to_string()
+        }
+        "save" => {
+            if let Some(out) = flag("--out").or_else(|| flag("--path")) {
+                map.insert("path".to_string(), serde_json::json!(out));
+            }
+            "studio_save_scene".to_string()
+        }
+        "export" => {
+            if let Some(fmt) = flag("--format") {
+                map.insert("format".to_string(), serde_json::json!(fmt));
+            }
+            if let Some(out) = flag("--out") {
+                map.insert("out".to_string(), serde_json::json!(out));
+            }
+            "studio_export".to_string()
+        }
+        "call" => {
+            let Some(t) = flag("--tool") else {
+                eprintln!("agent call requires --tool <studio_*>");
+                return ExitCode::FAILURE;
+            };
+            if let Some(raw_args) = flag("--args") {
+                match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_args) {
+                    Ok(parsed) => map.extend(parsed),
+                    Err(e) => {
+                        eprintln!("invalid --args JSON: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            t
+        }
+        "batch" => {
+            let raw = match (flag("--file"), flag("--inline")) {
+                (Some(path), _) => read_file(&path),
+                (None, Some(inline)) => inline,
+                _ => {
+                    eprintln!("agent batch requires --file <calls.json> or --inline <json>");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(serde_json::Value::Array(arr)) => {
+                    map.insert("calls".to_string(), serde_json::Value::Array(arr));
+                }
+                Ok(obj) => {
+                    if let Some(arr) = obj.get("calls").and_then(|v| v.as_array()) {
+                        map.insert("calls".to_string(), serde_json::Value::Array(arr.clone()));
+                    } else {
+                        eprintln!("agent batch JSON must be an array or {{"calls": [...]}}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("invalid batch JSON: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            "studio_batch".to_string()
+        }
+        other => {
+            if other.starts_with("studio_") {
+                other.to_string()
+            } else {
+                eprintln!("unknown agent subcommand {other:?}
+{}", usage());
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
+    let args_val = serde_json::Value::Object(map);
+
+    // Offline / headless direct scene mode when `--scene` is supplied (except for `agent load --scene`)
+    if subcmd != "load" {
+        if let Some(scene_path) = flag("--scene") {
+            let mut state = kine_studio::StudioState::new(workspace);
+            state.engine.set_backend(backend);
+            if let Err(e) = state.load_scene_file(Path::new(&scene_path)) {
+                eprintln!("agent load error ({scene_path}): {e}");
+                return ExitCode::FAILURE;
+            }
+            let res = kine_studio::dispatch_agent_tool(&mut state, &tool_name, &args_val);
+            if res.ok && (has_flag("--save") || flag("--save-out").is_some()) {
+                let save_target = flag("--save-out").unwrap_or(scene_path);
+                if let Err(e) = state.save_scene_def_to_disk(Some(Path::new(&save_target))) {
+                    eprintln!("agent save error ({save_target}): {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            if subcmd == "selection" && has_flag("--prompt") {
+                if let Some(p) = res.payload.get("agentContextPrompt").and_then(|v| v.as_str()) {
+                    println!("{p}");
+                    return ExitCode::SUCCESS;
+                }
+            }
+            println!("{}", serde_json::to_string_pretty(&res).unwrap());
+            return if res.ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+        }
+    }
+
+    // Live TCP Bridge mode against a running Kine Studio window
+    match kine_studio::bridge_call(&addr, &tool_name, args_val) {
+        Ok(res) => {
+            if subcmd == "selection" && has_flag("--prompt") {
+                if let Some(p) = res.payload.get("agentContextPrompt").and_then(|v| v.as_str()) {
+                    println!("{p}");
+                    return ExitCode::SUCCESS;
+                }
+            }
+            println!("{}", serde_json::to_string_pretty(&res).unwrap());
+            if res.ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
 }
