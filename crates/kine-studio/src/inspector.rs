@@ -4,7 +4,7 @@
 //! `LayersPanel.tsx`: layout geometry (`X`, `Y`, `W`, `H`), 2D transforms,
 //! appearance (fill, stroke, shadow, corner radius), typography, WGSL shader
 //! uniform reflection, keyframe & easing controls, and Z-ordered layer tree
-//! management.
+//! management with collapsible cascading hierarchy.
 
 use crate::state::{node_at_path_mut, StudioError, StudioState};
 use crate::timeline::{node_def_badge, node_def_display_label};
@@ -56,6 +56,9 @@ pub struct LayerTreeRow {
     pub label: String,
     pub visible: bool,
     pub selected: bool,
+    pub has_children: bool,
+    pub collapsed: bool,
+    pub anim_count: usize,
     pub can_move_up: bool,
     pub can_move_down: bool,
 }
@@ -159,19 +162,25 @@ impl StudioState {
         })
     }
 
-    /// Build the hierarchical list of rows for the Right Dock's `Layers` panel.
+    /// Build the hierarchical list of rows for the Right Dock's `Layers` panel,
+    /// respecting `self.collapsed_nodes` for cascading tree disclosure.
     pub fn build_layer_tree_rows(&self) -> Vec<LayerTreeRow> {
         let paths = self.node_paths();
         let mut rows = Vec::with_capacity(paths.len());
 
         for (node_id, path) in &paths {
+            if self.is_node_hidden_by_collapse(*node_id) {
+                continue;
+            }
             let Some(def) = self.node_def(*node_id) else {
                 continue;
             };
             let visible = !def.opacity.is_some_and(|o| o <= 0.001);
+            let has_children = def.children.as_ref().is_some_and(|c| !c.is_empty());
+            let collapsed = self.collapsed_nodes.contains(&node_id.0);
+            let anim_count = def.animate.as_ref().map_or(0, |m| m.len());
             let (can_up, can_down) = if let Some((&child_idx, parent_path)) = path.split_last() {
-                let sib_len = self
-                    .node_paths()
+                let sib_len = paths
                     .iter()
                     .find(|(_, p)| p.as_slice() == parent_path)
                     .and_then(|(pid, _)| self.node_def(*pid))
@@ -189,12 +198,61 @@ impl StudioState {
                 label: node_def_display_label(*node_id, def),
                 visible,
                 selected: self.selected_node == Some(*node_id),
+                has_children,
+                collapsed,
+                anim_count,
                 can_move_up: can_up,
                 can_move_down: can_down,
             });
         }
 
         rows
+    }
+
+    /// Set exact geometry (`x`, `y`, `width`, `height`) on the selected node.
+    pub fn inspector_set_geometry(
+        &mut self,
+        x: Option<f32>,
+        y: Option<f32>,
+        width: Option<f32>,
+        height: Option<f32>,
+    ) -> Result<(), StudioError> {
+        let node_id = self.selected_node.unwrap_or(NodeId(0));
+        let cur_rect = self
+            .node_abs_rect(node_id)
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, 100.0, 100.0));
+        self.mutate_node(node_id, format!("Update geometry on {node_id}"), move |def| {
+            if x.is_some() || y.is_some() {
+                if def.position.is_none() {
+                    def.position = Some("absolute".to_string());
+                }
+                let inset = def.inset.get_or_insert_with(EdgesDef::default);
+                if let Some(nx) = x {
+                    inset.left = Some(nx);
+                } else if inset.left.is_none() {
+                    inset.left = Some(cur_rect.x);
+                }
+                if let Some(ny) = y {
+                    inset.top = Some(ny);
+                } else if inset.top.is_none() {
+                    inset.top = Some(cur_rect.y);
+                }
+            }
+            if width.is_some() || height.is_some() {
+                let size = def.size.get_or_insert_with(SizeDef::default);
+                if let Some(nw) = width {
+                    size.width = Some(nw.max(4.0));
+                } else if size.width.is_none() {
+                    size.width = Some(cur_rect.width);
+                }
+                if let Some(nh) = height {
+                    size.height = Some(nh.max(4.0));
+                } else if size.height.is_none() {
+                    size.height = Some(cur_rect.height);
+                }
+            }
+            Ok(())
+        })
     }
 
     /// Nudge selected node's `inset.left` and `inset.top` by `(dx, dy)` pixels.
@@ -306,6 +364,39 @@ impl StudioState {
         )
     }
 
+    /// Nudge 2D translation (`translate_x`, `translate_y`) on the selected node.
+    pub fn inspector_nudge_translation(&mut self, dtx: f32, dty: f32) -> Result<(), StudioError> {
+        let node_id = self.selected_node.unwrap_or(NodeId(0));
+        let auto_kf = self.auto_keyframe;
+        let t = self.current_time;
+
+        self.mutate_node(
+            node_id,
+            format!("Translate {node_id} by ({dtx:+.0}, {dty:+.0})"),
+            move |def| {
+                let nx = def.translate_x.unwrap_or(0.0) + dtx;
+                let ny = def.translate_y.unwrap_or(0.0) + dty;
+                def.translate_x = Some(nx);
+                def.translate_y = Some(ny);
+                if auto_kf {
+                    if let Some(anim_map) = &mut def.animate {
+                        if dtx.abs() > 1e-4 {
+                            if let Some(spec) = anim_map.get_mut("translateX") {
+                                upsert_keyframe_in_spec(spec, t, nx);
+                            }
+                        }
+                        if dty.abs() > 1e-4 {
+                            if let Some(spec) = anim_map.get_mut("translateY") {
+                                upsert_keyframe_in_spec(spec, t, ny);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )
+    }
+
     /// Adjust rotation in degrees on the selected node.
     pub fn inspector_nudge_rotation(&mut self, delta_deg: f32) -> Result<(), StudioError> {
         let node_id = self.selected_node.unwrap_or(NodeId(0));
@@ -408,6 +499,53 @@ impl StudioState {
         )
     }
 
+    /// Set or nudge stroke width and stroke color on the selected node.
+    pub fn inspector_set_stroke(
+        &mut self,
+        color: Option<&str>,
+        width_delta: Option<f32>,
+    ) -> Result<(), StudioError> {
+        let node_id = self.selected_node.unwrap_or(NodeId(0));
+        if let Some(c) = color {
+            let _ = kine_script::parse_color(c)?;
+        }
+        let color_opt = color.map(str::to_string);
+        self.mutate_node(node_id, format!("Update stroke on {node_id}"), move |def| {
+            if let Some(c) = color_opt {
+                def.stroke_color = Some(c);
+                if def.stroke_width.unwrap_or(0.0) <= 0.0 {
+                    def.stroke_width = Some(2.0);
+                }
+            }
+            if let Some(dw) = width_delta {
+                let next = (def.stroke_width.unwrap_or(0.0) + dw).clamp(0.0, 48.0);
+                def.stroke_width = Some(next);
+                if next > 0.0 && def.stroke_color.is_none() {
+                    def.stroke_color = Some("#3de4a8".to_string());
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Set or nudge drop shadow blur on the selected node.
+    pub fn inspector_nudge_shadow_blur(&mut self, delta: f32) -> Result<(), StudioError> {
+        let node_id = self.selected_node.unwrap_or(NodeId(0));
+        self.mutate_node(
+            node_id,
+            format!("Adjust shadow blur on {node_id} by {delta:+.1}"),
+            move |def| {
+                let next = (def.shadow_blur.unwrap_or(0.0) + delta).clamp(0.0, 96.0);
+                def.shadow_blur = Some(next);
+                if next > 0.0 && def.shadow_color.is_none() {
+                    def.shadow_color = Some("#00000099".to_string());
+                    def.shadow_offset_y = Some(6.0);
+                }
+                Ok(())
+            },
+        )
+    }
+
     /// Update text content on a `Text` node.
     pub fn inspector_set_text_content(&mut self, content: &str) -> Result<(), StudioError> {
         let node_id = self.selected_node.unwrap_or(NodeId(0));
@@ -436,6 +574,19 @@ impl StudioState {
         )
     }
 
+    /// Set font weight (`400`, `500`, `700`) on a `Text` node.
+    pub fn inspector_set_font_weight(&mut self, weight: u16) -> Result<(), StudioError> {
+        let node_id = self.selected_node.unwrap_or(NodeId(0));
+        self.mutate_node(
+            node_id,
+            format!("Set font weight on {node_id} to {weight}"),
+            move |def| {
+                def.font_weight = Some(weight.clamp(100, 900));
+                Ok(())
+            },
+        )
+    }
+
     /// Set text alignment (`left`, `center`, `right`) on a `Text` node.
     pub fn inspector_set_text_align(&mut self, align: &str) -> Result<(), StudioError> {
         let node_id = self.selected_node.unwrap_or(NodeId(0));
@@ -451,19 +602,48 @@ impl StudioState {
     }
 
     /// Update the easing curve on `property` for the selected node.
+    /// If the property has no animation track yet, creates a default track so the easing button is never a dead no-op.
     pub fn inspector_set_easing(&mut self, property: &str, easing: &str) -> Result<(), StudioError> {
         let node_id = self.selected_node.unwrap_or(NodeId(0));
-        let prop = property.to_string();
+        let prop = if property.trim().is_empty() {
+            "opacity".to_string()
+        } else {
+            property.trim().to_string()
+        };
         let ease = easing.to_string();
         self.active_easing_input = ease.clone();
+        let cur_val = self.sample_property_value(node_id, &prop);
+        let dur = self.duration.max(1.0);
 
         self.mutate_node(
             node_id,
             format!("Set easing on {node_id}.{prop} to {ease}"),
             move |def| {
                 let anim_map = def.animate.get_or_insert_with(BTreeMap::new);
-                if let Some(spec) = anim_map.get_mut(&prop) {
-                    spec.easing = Some(ease);
+                let spec = anim_map.entry(prop).or_insert_with(|| AnimationDef {
+                    from: cur_val,
+                    to: cur_val,
+                    start: 0.0,
+                    end: dur.min(1.5),
+                    keyframes: None,
+                    easing: Some(ease.clone()),
+                });
+                spec.easing = Some(ease);
+                Ok(())
+            },
+        )
+    }
+
+    /// Remove an animation track on `property` for the selected node.
+    pub fn inspector_delete_animation_track(&mut self, property: &str) -> Result<(), StudioError> {
+        let node_id = self.selected_node.unwrap_or(NodeId(0));
+        let prop = property.to_string();
+        self.mutate_node(
+            node_id,
+            format!("Remove animation track {node_id}.{prop}"),
+            move |def| {
+                if let Some(anim_map) = &mut def.animate {
+                    anim_map.remove(&prop);
                 }
                 Ok(())
             },
@@ -487,6 +667,30 @@ impl StudioState {
                 Ok(())
             },
         )
+    }
+
+    /// Adjust an audio track's gain (`dB`) or pan (`-1.0..=1.0`).
+    pub fn inspector_adjust_audio_track(
+        &mut self,
+        track_index: usize,
+        gain_delta_db: Option<f32>,
+        toggle_mute: bool,
+    ) -> Result<(), StudioError> {
+        self.commit_mutation(format!("Update audio track #{track_index}"), move |def| {
+            let Some(audio) = &mut def.audio else {
+                return Ok(());
+            };
+            let Some(tr) = audio.tracks.get_mut(track_index) else {
+                return Ok(());
+            };
+            if let Some(dg) = gain_delta_db {
+                tr.gain_db = (tr.gain_db + dg).clamp(-48.0, 12.0);
+            }
+            if toggle_mute {
+                tr.muted = !tr.muted;
+            }
+            Ok(())
+        })
     }
 
     /// Toggle visibility (`opacity = 0.0` vs `1.0`) of `node_id` in the Layers panel.

@@ -47,6 +47,8 @@ pub struct TimelineTrack {
     pub end_sec: f64,
     pub selected: bool,
     pub muted_or_hidden: bool,
+    pub has_children: bool,
+    pub collapsed: bool,
     pub keyframes: Vec<TimelineKeyframeMarker>,
 }
 
@@ -97,12 +99,16 @@ pub fn generate_ruler_ticks(duration: f64, zoom_pps: f32) -> Vec<TimelineTick> {
 
 impl StudioState {
     /// Extract all hierarchical node lanes, animated property sub-lanes, and audio tracks
-    /// for rendering in the bottom NLE timeline.
+    /// for rendering in the bottom NLE timeline, respecting `self.collapsed_nodes` and
+    /// `self.settings.timeline_show_subtracks`.
     pub fn build_timeline_tracks(&self) -> Vec<TimelineTrack> {
         let mut tracks = Vec::new();
         let comp_dur = self.duration.max(1.0);
 
         for (node_id, path) in self.node_paths() {
+            if self.is_node_hidden_by_collapse(node_id) {
+                continue;
+            }
             let Some(def) = self.node_def(node_id) else {
                 continue;
             };
@@ -113,6 +119,12 @@ impl StudioState {
                 node_time_span_and_keyframes(node_id, def, comp_dur);
             let hidden = def.opacity.is_some_and(|o| o <= 0.001);
             let selected = self.selected_node == Some(node_id);
+            let has_children = def
+                .children
+                .as_ref()
+                .is_some_and(|c| !c.is_empty())
+                || def.animate.as_ref().is_some_and(|m| !m.is_empty());
+            let collapsed = self.collapsed_nodes.contains(&node_id.0);
 
             let anim_count = def.animate.as_ref().map_or(0, |m| m.len());
             let subtitle = if anim_count > 0 {
@@ -133,28 +145,34 @@ impl StudioState {
                 end_sec,
                 selected,
                 muted_or_hidden: hidden,
+                has_children,
+                collapsed,
                 keyframes: all_kfs,
             });
 
-            // When a node is selected (or has animations), emit its property sub-tracks.
-            if let Some(anim_map) = &def.animate {
-                for (prop, spec) in anim_map {
-                    let (p_start, p_end, kfs) = animation_spec_markers(node_id, prop, spec);
-                    let easing = spec.easing.clone().unwrap_or_else(|| "linear".to_string());
-                    tracks.push(TimelineTrack {
-                        kind: TimelineTrackKind::AnimationProperty {
-                            node_id,
-                            property: prop.clone(),
-                            easing: easing.clone(),
-                        },
-                        label: prop.clone(),
-                        subtitle: format!("{p_start:.2}s..{p_end:.2}s ({easing})"),
-                        start_sec: p_start,
-                        end_sec: p_end,
-                        selected: selected && self.active_anim_property == *prop,
-                        muted_or_hidden: hidden,
-                        keyframes: kfs,
-                    });
+            // When subtracks are enabled and this node is not collapsed, emit its property sub-tracks.
+            if self.settings.timeline_show_subtracks && !collapsed {
+                if let Some(anim_map) = &def.animate {
+                    for (prop, spec) in anim_map {
+                        let (p_start, p_end, kfs) = animation_spec_markers(node_id, prop, spec);
+                        let easing = spec.easing.clone().unwrap_or_else(|| "linear".to_string());
+                        tracks.push(TimelineTrack {
+                            kind: TimelineTrackKind::AnimationProperty {
+                                node_id,
+                                property: prop.clone(),
+                                easing: easing.clone(),
+                            },
+                            label: prop.clone(),
+                            subtitle: format!("{p_start:.2}s..{p_end:.2}s ({easing})"),
+                            start_sec: p_start,
+                            end_sec: p_end,
+                            selected: selected && self.active_anim_property == *prop,
+                            muted_or_hidden: hidden,
+                            has_children: false,
+                            collapsed: false,
+                            keyframes: kfs,
+                        });
+                    }
                 }
             }
         }
@@ -175,6 +193,8 @@ impl StudioState {
                     end_sec: end,
                     selected: false,
                     muted_or_hidden: tr.muted,
+                    has_children: false,
+                    collapsed: false,
                     keyframes: Vec::new(),
                 });
             }

@@ -1,20 +1,24 @@
 //! In-process `StudioState` synchronizing `kine_server::Engine`, authored
-//! `kine_script::SceneDef`, undo/redo history, transport clock, and render jobs
-//! inside a single process without IPC or duplicate renderers.
+//! `kine_script::SceneDef`, undo/redo history, transport clock, settings,
+//! UI animations, and render jobs inside a single process without IPC.
 
 use crate::catalog::{
     build_catalog_node, default_assets, default_compositions, starter_kinetic_scene, AssetEntry,
-    CompositionEntry,
+    AssetKind, CompositionEntry,
 };
 use crate::chat::StudioChatSession;
+use crate::theme::{
+    SettingsCategory, StudioAnimState, StudioSettings, StudioThemeMode, ViewportChannelMode,
+};
 use kine_core::{NodeId, Rect, Scene};
 use kine_platform::{resolve_output, write_output, PlatformInfo};
 use kine_render::{FrameFormat, RasterPixmap, RenderBackend};
-use kine_script::{AudioDef, AudioTrackDef, NodeDef, SceneDef};
+use kine_script::{AudioDef, AudioTrackDef, EdgesDef, NodeDef, SceneDef, SizeDef};
 use kine_server::{
     render_video, Engine, Finding, SceneHandle, VideoContainer, VideoEncoder, VideoOptions,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
@@ -129,6 +133,15 @@ pub struct StudioState {
     pub inspector_visible: bool,
     pub ask_agent_modal_open: bool,
 
+    // ── Settings Window & UI Animation State ───────────────────────────────
+    pub settings: StudioSettings,
+    pub settings_open: bool,
+    pub settings_category: SettingsCategory,
+    pub anim: StudioAnimState,
+    pub open_inspector_sections: BTreeSet<String>,
+    pub catalog_category_filter: String,
+    pub viewport_channel: ViewportChannelMode,
+
     // ── Selection & Undo/Redo ──────────────────────────────────────────────
     pub selected_node: Option<NodeId>,
     pub active_anim_property: String,
@@ -156,7 +169,7 @@ pub struct StudioState {
     // ── Theme & Flat Inspector UX State (Hyperframes Parity) ───────────────
     pub dark_theme: bool,
     pub open_inspector_group: String,
-    pub collapsed_nodes: std::collections::BTreeSet<u64>,
+    pub collapsed_nodes: BTreeSet<u64>,
 
     // ── Viewport & Raster Cache ────────────────────────────────────────────
     pub viewport_zoom: f32,
@@ -219,6 +232,17 @@ impl StudioState {
         #[cfg(feature = "xilem-ui")]
         let frame_image_data = pixmap_to_xilem_image(&raw_px);
 
+        let mut open_sections = BTreeSet::new();
+        open_sections.insert("layout".to_string());
+        open_sections.insert("transform".to_string());
+        open_sections.insert("style".to_string());
+        open_sections.insert("text".to_string());
+        open_sections.insert("motion".to_string());
+        open_sections.insert("fx".to_string());
+
+        let settings = Self::load_settings_from_disk(workspace_root.as_deref()).unwrap_or_default();
+        let dark_theme = settings.theme_mode.is_dark();
+
         let mut state = Self {
             engine,
             scene_handle,
@@ -235,6 +259,13 @@ impl StudioState {
             right_tab: RightDockTab::Design,
             inspector_visible: true,
             ask_agent_modal_open: false,
+            settings,
+            settings_open: false,
+            settings_category: SettingsCategory::Appearance,
+            anim: StudioAnimState::default(),
+            open_inspector_sections: open_sections,
+            catalog_category_filter: "All".to_string(),
+            viewport_channel: ViewportChannelMode::Rgb,
             selected_node: Some(NodeId(4)),
             active_anim_property: "translateX".to_string(),
             active_easing_input: "easeOutCubic".to_string(),
@@ -253,9 +284,9 @@ impl StudioState {
             timeline_snap_enabled: true,
             auto_keyframe: true,
             ripple_edit: false,
-            dark_theme: true,
+            dark_theme,
             open_inspector_group: "layout".to_string(),
-            collapsed_nodes: std::collections::BTreeSet::new(),
+            collapsed_nodes: BTreeSet::new(),
             viewport_zoom: 1.0,
             show_bounding_boxes: true,
             show_safe_guides: false,
@@ -281,6 +312,146 @@ impl StudioState {
         let _ = state.sync_scene_to_engine();
         state
     }
+
+    // ── Settings Persistence & Theme Control ───────────────────────────────
+
+    fn settings_file_path(workspace_root: Option<&Path>) -> PathBuf {
+        let base = workspace_root
+            .map(Path::to_path_buf)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join("studio-settings.json")
+    }
+
+    fn load_settings_from_disk(workspace_root: Option<&Path>) -> Option<StudioSettings> {
+        let path = Self::settings_file_path(workspace_root);
+        let text = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Save `self.settings` to `studio-settings.json` in the workspace root.
+    pub fn save_settings_to_disk(&mut self) -> Result<PathBuf, StudioError> {
+        let path = Self::settings_file_path(self.workspace_root.as_deref());
+        let json = serde_json::to_string_pretty(&self.settings)
+            .map_err(|e| StudioError::Message(format!("serialize settings: {e}")))?;
+        std::fs::write(&path, json)
+            .map_err(|e| StudioError::Message(format!("write {}: {e}", path.display())))?;
+        self.notify_status(format!("Saved studio settings to {}", path.display()));
+        Ok(path)
+    }
+
+    /// Reset all studio settings back to factory defaults.
+    pub fn reset_settings_to_defaults(&mut self) {
+        self.settings = StudioSettings::default();
+        self.dark_theme = self.settings.theme_mode.is_dark();
+        self.fps = self.settings.default_fps;
+        let _ = self.render_current_frame();
+        self.notify_status("Reset all UI & Editor settings to defaults");
+    }
+
+    /// Set the active `StudioThemeMode` and synchronize `self.dark_theme`.
+    pub fn set_theme_mode(&mut self, mode: StudioThemeMode) {
+        self.settings.theme_mode = mode;
+        self.dark_theme = mode.is_dark();
+        self.notify_status(format!("Theme switched to {}", mode.label()));
+    }
+
+    /// Cycle through `GraphiteDark` -> `CarbonObsidian` -> `WarmPaper`.
+    pub fn cycle_theme_mode(&mut self) {
+        let next = self.settings.theme_mode.next();
+        self.set_theme_mode(next);
+    }
+
+    /// Toggle whether an inspector section is expanded in the cascading accordion.
+    pub fn toggle_inspector_section(&mut self, section_id: &str) {
+        if self.open_inspector_sections.contains(section_id) {
+            self.open_inspector_sections.remove(section_id);
+            if self.open_inspector_group == section_id {
+                self.open_inspector_group.clear();
+            }
+        } else {
+            self.open_inspector_sections.insert(section_id.to_string());
+            self.open_inspector_group = section_id.to_string();
+        }
+    }
+
+    /// Check whether an inspector section is currently open.
+    pub fn is_inspector_section_open(&self, section_id: &str) -> bool {
+        self.open_inspector_group == "all" || self.open_inspector_sections.contains(section_id)
+    }
+
+    /// Expand or collapse all cascading inspector sections at once.
+    pub fn set_all_inspector_sections(&mut self, expand: bool) {
+        self.open_inspector_sections.clear();
+        if expand {
+            for id in [
+                "layout",
+                "transform",
+                "style",
+                "stroke",
+                "text",
+                "motion",
+                "fx",
+                "audio",
+            ] {
+                self.open_inspector_sections.insert(id.to_string());
+            }
+            self.open_inspector_group = "all".to_string();
+        } else {
+            self.open_inspector_group.clear();
+        }
+    }
+
+    /// Set a status message and trigger the animated notification toast timer.
+    pub fn notify_status(&mut self, msg: impl Into<String>) {
+        self.status_banner = msg.into();
+        self.anim.toast_timer = 1.0;
+    }
+
+    /// Returns `true` if either playback or a UI transition animation needs a 60Hz tick.
+    pub fn needs_animation_tick(&self) -> bool {
+        if self.is_playing {
+            return true;
+        }
+        if self.settings.reduced_motion {
+            return false;
+        }
+        let target_settings = if self.settings_open { 1.0 } else { 0.0 };
+        let target_agent = if self.ask_agent_modal_open { 1.0 } else { 0.0 };
+        let target_left = if self.settings.left_dock_visible {
+            1.0
+        } else {
+            0.0
+        };
+        let target_right = if self.inspector_visible { 1.0 } else { 0.0 };
+
+        (self.anim.smooth_playhead - self.current_time).abs() > 1e-3
+            || (self.anim.settings_modal_t - target_settings).abs() > 0.01
+            || (self.anim.agent_modal_t - target_agent).abs() > 0.01
+            || (self.anim.left_dock_t - target_left).abs() > 0.01
+            || (self.anim.right_dock_t - target_right).abs() > 0.01
+            || self.anim.toast_timer > 0.01
+    }
+
+    /// Step both playback and UI transition animations by `dt_real_seconds`.
+    pub fn tick_studio(&mut self, dt_real_seconds: f64) {
+        if self.is_playing {
+            self.tick_playback(dt_real_seconds);
+        }
+        self.anim.step(
+            dt_real_seconds as f32,
+            self.current_time,
+            self.settings_open,
+            self.ask_agent_modal_open,
+            self.settings.left_dock_visible,
+            self.inspector_visible,
+            &self.open_inspector_sections,
+            self.settings.animation_speed,
+            self.settings.reduced_motion,
+        );
+    }
+
+    // ── Project & Modules ──────────────────────────────────────────────────
 
     /// Base directory used to discover `Modules/` for the active project.
     fn module_base(&self) -> PathBuf {
@@ -311,8 +482,168 @@ impl StudioState {
             def.root.children.get_or_insert_with(Vec::new).push(node);
             Ok(())
         })?;
-        self.status_banner = format!("Inserted module {name}");
+        self.notify_status(format!("Inserted module {name}"));
         Ok(())
+    }
+
+    /// Insert or apply a built-in/discovered `AssetEntry` into the active scene.
+    pub fn insert_or_apply_asset(&mut self, asset_index: usize) -> Result<(), StudioError> {
+        let Some(asset) = self.assets.get(asset_index).cloned() else {
+            return Err(StudioError::Message(format!(
+                "asset index {asset_index} out of bounds"
+            )));
+        };
+        match asset.kind {
+            AssetKind::Font => {
+                let font_name = asset
+                    .uri
+                    .strip_prefix("font:")
+                    .unwrap_or(&asset.name)
+                    .to_string();
+                let target = self.selected_node.unwrap_or(NodeId(0));
+                let is_text = self
+                    .node_def(target)
+                    .and_then(|d| d.kind.as_deref())
+                    .is_some_and(|k| k.eq_ignore_ascii_case("text"));
+                if is_text {
+                    self.mutate_node(target, format!("Set font family to {font_name}"), move |d| {
+                        d.font_family = Some(font_name);
+                        Ok(())
+                    })?;
+                    self.notify_status(format!("Applied font {} to {target}", asset.name));
+                } else {
+                    let _ = self.insert_catalog_item("text-headline")?;
+                    self.notify_status(format!("Inserted kinetic headline using {}", asset.name));
+                }
+            }
+            AssetKind::Image => {
+                let uri = asset.uri.clone();
+                let cw = self.scene_def.width as f32;
+                let ch = self.scene_def.height as f32;
+                self.commit_mutation(format!("Insert image asset {}", asset.name), move |def| {
+                    let children = def.root.children.get_or_insert_with(Vec::new);
+                    children.push(NodeDef {
+                        kind: Some("image".to_string()),
+                        src: Some(uri),
+                        object_fit: Some("cover".to_string()),
+                        corner_radius: Some(12.0),
+                        position: Some("absolute".to_string()),
+                        inset: Some(EdgesDef {
+                            left: Some((cw * 0.25).round()),
+                            top: Some((ch * 0.22).round()),
+                            ..Default::default()
+                        }),
+                        size: Some(SizeDef {
+                            width: Some(200.0),
+                            height: Some(140.0),
+                        }),
+                        ..Default::default()
+                    });
+                    Ok(())
+                })?;
+                if let Some((last_id, _)) = self.node_paths().last() {
+                    self.selected_node = Some(*last_id);
+                }
+                let _ = self.render_current_frame();
+                self.notify_status(format!("Inserted image asset '{}'", asset.name));
+            }
+            AssetKind::Video => {
+                let _ = self.insert_catalog_item("video-testbars")?;
+                self.notify_status(format!("Inserted video clip '{}'", asset.name));
+            }
+            AssetKind::Audio => {
+                let uri = asset.uri.clone();
+                let name = asset.name.clone();
+                self.commit_mutation(format!("Add audio bed {name}"), move |def| {
+                    let audio = def.audio.get_or_insert_with(|| AudioDef {
+                        sample_rate: 48_000,
+                        channels: 2,
+                        normalize_peak_db: Some(-1.0),
+                        tracks: Vec::new(),
+                    });
+                    audio.tracks.push(AudioTrackDef {
+                        src: uri,
+                        gain_db: -5.0,
+                        start: 0.0,
+                        trim_start: 0.0,
+                        trim_end: Some(2.8),
+                        loop_track: false,
+                        pan: 0.0,
+                        fade_in: 0.12,
+                        fade_out: 0.30,
+                        fade_curve: Some("equalPower".to_string()),
+                        highpass_hz: Some(80.0),
+                        lowpass_hz: None,
+                        eq: None,
+                        compressor: None,
+                        duck_db: 0.0,
+                        duck_threshold_db: None,
+                        muted: false,
+                    });
+                    Ok(())
+                })?;
+                self.notify_status(format!("Added DSP audio track '{}'", asset.name));
+            }
+            AssetKind::Shader => {
+                let preset_id = if asset.uri.contains("vignette") {
+                    "shader-vignette"
+                } else {
+                    "shader-film-grain"
+                };
+                let _ = self.insert_catalog_item(preset_id)?;
+                self.notify_status(format!("Inserted WGSL shader pass '{}'", asset.name));
+            }
+        }
+        Ok(())
+    }
+
+    /// Create a fresh composition using `self.settings.default_canvas_width/height` and select it.
+    pub fn create_new_composition(&mut self) -> Result<usize, StudioError> {
+        let idx = self.compositions.len() + 1;
+        let w = self.settings.default_canvas_width.clamp(128, 3840);
+        let h = self.settings.default_canvas_height.clamp(128, 2160);
+        let mut def = starter_kinetic_scene();
+        def.width = w;
+        def.height = h;
+        def.root.size = Some(SizeDef {
+            width: Some(w as f32),
+            height: Some(h as f32),
+        });
+
+        let entry = CompositionEntry {
+            id: format!("comp-{idx:02}"),
+            title: format!("{idx:02} // Studio Composition"),
+            subtitle: format!("{w}x{h} · {:.0}fps · Custom scene", self.settings.default_fps),
+            source_path: None,
+            scene_def: def,
+        };
+        self.compositions.push(entry);
+        let new_idx = self.compositions.len() - 1;
+        self.select_composition(new_idx)?;
+        Ok(new_idx)
+    }
+
+    /// Resize the active composition canvas (`width`, `height`) inside an undoable transaction.
+    pub fn resize_canvas(&mut self, width: u32, height: u32) -> Result<(), StudioError> {
+        let w = width.clamp(64, 3840);
+        let h = height.clamp(64, 2160);
+        self.commit_mutation(format!("Resize canvas to {w}x{h}"), move |def| {
+            def.width = w;
+            def.height = h;
+            if let Some(sz) = &mut def.root.size {
+                sz.width = Some(w as f32);
+                sz.height = Some(h as f32);
+            }
+            Ok(())
+        })
+    }
+
+    /// Format `self.source_buffer` as canonical pretty-printed JSON from `self.scene_def`.
+    pub fn format_source_buffer(&mut self) {
+        if let Ok(pretty) = serde_json::to_string_pretty(&self.scene_def) {
+            self.source_buffer = pretty;
+            self.notify_status("Formatted scene source buffer (JSON AST)");
+        }
     }
 
     /// Load a `.ts` or `.json` scene file from disk into the studio.
@@ -337,9 +668,6 @@ impl StudioState {
         self.source_buffer =
             serde_json::to_string_pretty(&self.scene_def).unwrap_or_else(|_| content);
 
-        // Make the loaded file the active composition so the header and status
-        // bar name the scene that is actually on the stage instead of the last
-        // built-in starter.
         let title = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -374,9 +702,10 @@ impl StudioState {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.current_time = 0.0;
+        self.anim.smooth_playhead = 0.0;
         self.selected_node = Some(NodeId(0));
         self.sync_scene_to_engine()?;
-        self.status_banner = format!("Loaded scene {}", path.display());
+        self.notify_status(format!("Loaded scene {}", path.display()));
         Ok(())
     }
 
@@ -402,9 +731,10 @@ impl StudioState {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.current_time = 0.0;
+        self.anim.smooth_playhead = 0.0;
         self.selected_node = Some(NodeId(0));
         self.sync_scene_to_engine()?;
-        self.status_banner = format!("Switched to composition: {}", entry.title);
+        self.notify_status(format!("Switched to composition: {}", entry.title));
         Ok(())
     }
 
@@ -423,6 +753,10 @@ impl StudioState {
         }
         self.source_buffer =
             serde_json::to_string_pretty(&self.scene_def).unwrap_or_else(|_| "{}".to_string());
+
+        if let Some(comp) = self.compositions.get_mut(self.active_composition) {
+            comp.scene_def = self.scene_def.clone();
+        }
 
         if let Ok(report) = self.engine.inspect(self.scene_handle) {
             self.inspect_findings = report.findings;
@@ -464,12 +798,49 @@ impl StudioState {
         Ok(())
     }
 
-    /// Draw interactive bounding boxes, resize handles, and safe-area guides onto a copy of the frame.
+    /// Draw interactive bounding boxes, resize handles, channel isolation, and safe-area guides onto a copy of the frame.
     fn compose_viewport_overlay(&self, raw: &RasterPixmap) -> RasterPixmap {
         let w = raw.width();
         let h = raw.height();
         let mut out = RasterPixmap::new(w, h);
         out.data_mut().copy_from_slice(raw.data());
+
+        // Apply channel inspection filter if non-RGB
+        if self.viewport_channel != ViewportChannelMode::Rgb {
+            for px in out.data_mut() {
+                match self.viewport_channel {
+                    ViewportChannelMode::Rgb => {}
+                    ViewportChannelMode::Red => {
+                        px.g = 0;
+                        px.b = 0;
+                    }
+                    ViewportChannelMode::Green => {
+                        px.r = 0;
+                        px.b = 0;
+                    }
+                    ViewportChannelMode::Blue => {
+                        px.r = 0;
+                        px.g = 0;
+                    }
+                    ViewportChannelMode::Alpha => {
+                        let a = px.a;
+                        px.r = a;
+                        px.g = a;
+                        px.b = a;
+                        px.a = 255;
+                    }
+                    ViewportChannelMode::Luma => {
+                        let y = ((u32::from(px.r) * 299
+                            + u32::from(px.g) * 587
+                            + u32::from(px.b) * 114)
+                            / 1000) as u8;
+                        px.r = y;
+                        px.g = y;
+                        px.b = y;
+                    }
+                }
+            }
+        }
 
         if self.show_safe_guides {
             // 10% title safe and 5% action safe reticles
@@ -492,7 +863,7 @@ impl StudioState {
         if self.show_grid_overlay {
             let fw = f32::from(w);
             let fh = f32::from(h);
-            // Rule of thirds + center crosshair
+            // Rule of thirds + optional center crosshair
             draw_rect_outline(
                 &mut out,
                 Rect::new(fw / 3.0, 0.0, fw / 3.0, fh),
@@ -507,6 +878,14 @@ impl StudioState {
                 1,
                 true,
             );
+            if self.settings.show_center_crosshair {
+                let cx = (fw * 0.5).round() as i32;
+                let cy = (fh * 0.5).round() as i32;
+                for d in -10..=10 {
+                    blend_pixel(&mut out, cx + d, cy, [61, 228, 168, 130]);
+                    blend_pixel(&mut out, cx, cy + d, [61, 228, 168, 130]);
+                }
+            }
         }
 
         if self.show_bounding_boxes {
@@ -528,6 +907,31 @@ impl StudioState {
         out
     }
 
+    /// Hit-test a canvas pixel coordinate `(canvas_x, canvas_y)` and select the topmost matching node.
+    pub fn hit_test_and_select(&mut self, canvas_x: f32, canvas_y: f32) -> Option<NodeId> {
+        let mut hit = NodeId(0);
+        for (nid, _) in self.node_paths().into_iter().skip(1) {
+            let visible = self
+                .node_def(nid)
+                .map_or(true, |d| !d.opacity.is_some_and(|o| o <= 0.001));
+            if !visible {
+                continue;
+            }
+            if let Some(r) = self.node_abs_rect(nid) {
+                if canvas_x >= r.x
+                    && canvas_x <= r.x + r.width
+                    && canvas_y >= r.y
+                    && canvas_y <= r.y + r.height
+                {
+                    hit = nid;
+                }
+            }
+        }
+        self.selected_node = Some(hit);
+        let _ = self.render_current_frame();
+        Some(hit)
+    }
+
     /// Compute total composition duration across keyframe tracks, video clips, and audio tracks.
     pub fn compute_composition_duration(&self) -> f64 {
         let mut max_sec = self
@@ -545,7 +949,7 @@ impl StudioState {
             }
         }
 
-        max_sec.max(3.0)
+        max_sec.max(self.settings.default_duration.max(1.0))
     }
 
     /// Current 0-based frame index at `self.current_time` and `self.fps`.
@@ -585,6 +989,7 @@ impl StudioState {
             t = self.snap_time(t);
         }
         self.current_time = t;
+        self.anim.smooth_playhead = t;
         let _ = self.render_current_frame();
     }
 
@@ -594,14 +999,11 @@ impl StudioState {
         let dt = f64::from(delta_frames) / self.fps.max(1.0);
         let next = (self.current_time + dt).clamp(0.0, self.duration);
         self.current_time = next;
+        self.anim.smooth_playhead = next;
         let _ = self.render_current_frame();
     }
 
     /// Advance the playback clock by `dt_real_seconds` when `self.is_playing` is true.
-    ///
-    /// The UI ticker runs faster than the composition frame rate. Rasterizing on
-    /// every tick would waste the whole frame budget, so only redraw when the
-    /// integer frame under the playhead actually changes.
     pub fn tick_playback(&mut self, dt_real_seconds: f64) {
         if !self.is_playing {
             return;
@@ -618,6 +1020,7 @@ impl StudioState {
         } else {
             self.current_time = next.max(0.0);
         }
+        self.anim.smooth_playhead = self.current_time;
         if self.current_frame_index() != previous_frame || !self.is_playing {
             let _ = self.render_current_frame();
         }
@@ -625,7 +1028,7 @@ impl StudioState {
 
     /// Snap a timestamp to the nearest keyframe, quarter-second tick, or frame boundary.
     pub fn snap_time(&self, raw_time: f64) -> f64 {
-        let threshold = 0.04;
+        let threshold = self.settings.snap_tolerance_sec.clamp(0.005, 0.25);
         // 1. Check existing keyframes across the scene
         if let Ok(scene) = self.engine.scene(self.scene_handle) {
             for anim in &scene.animations {
@@ -668,6 +1071,35 @@ impl StudioState {
             .into_iter()
             .find(|(nid, _)| *nid == id)
             .map(|(_, path)| path)
+    }
+
+    /// Check if any ancestor of `id` is in `self.collapsed_nodes`.
+    pub fn is_node_hidden_by_collapse(&self, id: NodeId) -> bool {
+        if self.collapsed_nodes.is_empty() || id == NodeId(0) {
+            return false;
+        }
+        let all_paths = self.node_paths();
+        let Some((_, target_path)) = all_paths.iter().find(|(nid, _)| *nid == id) else {
+            return false;
+        };
+        for depth in 0..target_path.len() {
+            let prefix = &target_path[..depth];
+            if let Some((ancestor_id, _)) = all_paths.iter().find(|(_, p)| p.as_slice() == prefix) {
+                if self.collapsed_nodes.contains(&ancestor_id.0) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Toggle whether a container node's children are collapsed in the Layers & Timeline tree.
+    pub fn toggle_node_collapsed(&mut self, id: NodeId) {
+        if self.collapsed_nodes.contains(&id.0) {
+            self.collapsed_nodes.remove(&id.0);
+        } else {
+            self.collapsed_nodes.insert(id.0);
+        }
     }
 
     /// Borrow the authored `NodeDef` corresponding to `id`.
@@ -727,7 +1159,7 @@ impl StudioState {
         self.redo_stack.clear();
         self.scene_def = candidate;
         self.sync_scene_to_engine()?;
-        self.status_banner = format!("Committed: {label}");
+        self.notify_status(format!("Committed: {label}"));
         Ok(())
     }
 
@@ -763,7 +1195,7 @@ impl StudioState {
         self.scene_def = entry.scene_def;
         self.selected_node = entry.selected_node;
         let _ = self.sync_scene_to_engine();
-        self.status_banner = format!("Undo: {}", entry.label);
+        self.notify_status(format!("Undo: {}", entry.label));
         Some(entry.label)
     }
 
@@ -779,7 +1211,7 @@ impl StudioState {
         self.scene_def = entry.scene_def;
         self.selected_node = entry.selected_node;
         let _ = self.sync_scene_to_engine();
-        self.status_banner = format!("Redo: {}", entry.label);
+        self.notify_status(format!("Redo: {}", entry.label));
         Some(entry.label)
     }
 
@@ -872,12 +1304,12 @@ impl StudioState {
             .render_frame_format(self.scene_handle, frame_idx, format)?;
         write_output(&resolved, &bytes)
             .map_err(|e| StudioError::Message(format!("write {}: {e}", resolved.display())))?;
-        self.status_banner = format!(
+        self.notify_status(format!(
             "Captured frame {} ({} bytes) -> {}",
             frame_idx,
             bytes.len(),
             resolved.display()
-        );
+        ));
         Ok(resolved)
     }
 
@@ -917,7 +1349,7 @@ impl StudioState {
                 status: RenderJobStatus::Completed,
             };
             self.render_queue.push(job.clone());
-            self.status_banner = format!("Rendered still to {}", out_path.display());
+            self.notify_status(format!("Rendered still to {}", out_path.display()));
             return Ok(job);
         }
 
@@ -932,6 +1364,8 @@ impl StudioState {
         opts.fps_den = 1;
         opts.container = container;
         opts.encoder = VideoEncoder::Av1Software;
+        opts.quantizer = self.settings.export_quantizer;
+        opts.speed = self.settings.export_speed;
 
         match render_video(&mut self.engine, self.scene_handle, &opts) {
             Ok(report) => {
@@ -950,12 +1384,12 @@ impl StudioState {
                     status: RenderJobStatus::Completed,
                 };
                 self.render_queue.push(job.clone());
-                self.status_banner = format!(
+                self.notify_status(format!(
                     "Rendered {} frames ({} B) -> {}",
                     report.frames,
                     bytes_len,
                     out_path.display()
-                );
+                ));
                 Ok(job)
             }
             Err(e) => {
@@ -990,7 +1424,10 @@ impl StudioState {
         };
         self.engine.set_backend(next);
         let _ = self.render_current_frame();
-        self.status_banner = format!("Render backend set to {}", next.name().to_uppercase());
+        self.notify_status(format!(
+            "Render backend set to {}",
+            next.name().to_uppercase()
+        ));
     }
 }
 
