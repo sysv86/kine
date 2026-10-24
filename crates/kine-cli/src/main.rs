@@ -134,7 +134,9 @@ fn main() -> ExitCode {
                     let _ = std::fs::create_dir_all(parent);
                 }
             }
-            let wave_str = flag("--wave").or_else(|| flag("--waveform")).unwrap_or_else(|| "sine".to_string());
+            let wave_str = flag("--wave")
+                .or_else(|| flag("--waveform"))
+                .unwrap_or_else(|| "sine".to_string());
             let Some(waveform) = Waveform::parse(&wave_str) else {
                 eprintln!("unknown waveform {wave_str:?}");
                 return ExitCode::FAILURE;
@@ -145,7 +147,9 @@ fn main() -> ExitCode {
                 .and_then(|s| s.parse().ok());
             let seconds: f64 = flag_or("--seconds", "2").parse().unwrap_or(2.0);
             let gain: f32 = flag_or("--gain", "0.4").parse().unwrap_or(0.4);
-            let bits = flag("--bits").or_else(|| flag("--bit-depth")).unwrap_or_else(|| "16".to_string());
+            let bits = flag("--bits")
+                .or_else(|| flag("--bit-depth"))
+                .unwrap_or_else(|| "16".to_string());
             let channels: u16 = if has_flag("--stereo") { 2 } else { 1 };
 
             let spec = SynthSpec {
@@ -184,7 +188,9 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             };
             let seconds: f64 = flag_or("--seconds", "3").parse().unwrap_or(3.0);
-            let bits = flag("--bits").or_else(|| flag("--bit-depth")).unwrap_or_else(|| "16".to_string());
+            let bits = flag("--bits")
+                .or_else(|| flag("--bit-depth"))
+                .unwrap_or_else(|| "16".to_string());
             let out = resolve_output(Path::new(&out), &platform);
             let handle = load(&mut engine, &scene_path);
             match kine_server::mix_scene_audio(&engine, handle, seconds) {
@@ -454,9 +460,8 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             };
             let is_stdout = out_raw == "-";
-            let is_seq_dir = has_flag("--seq")
-                || out_raw.ends_with('/')
-                || Path::new(&out_raw).is_dir();
+            let is_seq_dir =
+                has_flag("--seq") || out_raw.ends_with('/') || Path::new(&out_raw).is_dir();
             let out = if is_stdout {
                 PathBuf::from("-")
             } else {
@@ -467,7 +472,10 @@ fn main() -> ExitCode {
 
             if is_seq_dir {
                 let frames_count: u64 = flag_or("--frames", "60").parse().unwrap_or(60);
-                let fps: f64 = flag_or("--fps", "30").parse::<f64>().unwrap_or(30.0).max(1.0);
+                let fps: f64 = flag_or("--fps", "30")
+                    .parse::<f64>()
+                    .unwrap_or(30.0)
+                    .max(1.0);
                 let frame_fmt = match frame_format_for(&out, explicit_fmt.as_deref()) {
                     Ok(fmt) => fmt,
                     Err(e) => {
@@ -515,18 +523,14 @@ fn main() -> ExitCode {
                 opts.fps_num = flag_or("--fps", "30").parse().unwrap_or(30);
                 opts.quantizer = flag_or("--quality", "100").parse().unwrap_or(100);
                 opts.speed = flag_or("--speed", "9").parse().unwrap_or(9);
-                opts.keyframe_interval = flag_or("--keyframe-interval", "60")
-                    .parse()
-                    .unwrap_or(60);
+                opts.keyframe_interval = flag_or("--keyframe-interval", "60").parse().unwrap_or(60);
                 opts.bitrate = flag_or("--bitrate", "0").parse().unwrap_or(0);
 
                 let requested = flag_or("--encoder", "av1");
                 match requested.to_ascii_lowercase().as_str() {
                     "av1" | "software" => opts.encoder = VideoEncoder::Av1Software,
                     #[cfg(feature = "hwencode")]
-                    "h264-hw" | "hardware" | "h264" => {
-                        opts.encoder = VideoEncoder::H264Hardware
-                    }
+                    "h264-hw" | "hardware" | "h264" => opts.encoder = VideoEncoder::H264Hardware,
                     #[cfg(not(feature = "hwencode"))]
                     "h264-hw" | "hardware" | "h264" => {
                         eprintln!(
@@ -759,7 +763,11 @@ fn main() -> ExitCode {
                 match kine_studio::bridge_call(&addr, tool, serde_json::json!({})) {
                     Ok(res) => {
                         println!("{}", serde_json::to_string_pretty(&res).unwrap());
-                        return if res.ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+                        return if res.ok {
+                            ExitCode::SUCCESS
+                        } else {
+                            ExitCode::FAILURE
+                        };
                     }
                     Err(e) => {
                         eprintln!("studio bridge error: {e}");
@@ -898,8 +906,9 @@ fn read_file_bytes(path: &str) -> Vec<u8> {
 /// `.txt` file (or any other unknown extension) would look like success.
 fn frame_format_for(out: &Path, explicit: Option<&str>) -> Result<FrameFormat, String> {
     if let Some(name) = explicit {
-        return FrameFormat::from_extension(name)
-            .ok_or_else(|| format!("unknown frame format {name:?} (png, qoi, bmp, ppm, pam, tga)"));
+        return FrameFormat::from_extension(name).ok_or_else(|| {
+            format!("unknown frame format {name:?} (png, qoi, bmp, ppm, pam, tga)")
+        });
     }
     match out.extension().and_then(|e| e.to_str()) {
         Some(ext) => FrameFormat::from_extension(ext)
@@ -971,7 +980,6 @@ fn starter_scene_json() -> String {
     });
     serde_json::to_string_pretty(&def).unwrap()
 }
-
 
 fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
     let subcmd = sub_args.first().map(String::as_str).unwrap_or("status");
@@ -1237,7 +1245,8 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
         "set-style" | "style" => {
             let mut changes = serde_json::Map::new();
             if let Some(raw_json) = flag("--json") {
-                match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_json) {
+                match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_json)
+                {
                     Ok(parsed) => changes.extend(parsed),
                     Err(e) => {
                         eprintln!("invalid --json for set-style: {e}");
@@ -1477,7 +1486,8 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
                 return ExitCode::FAILURE;
             };
             if let Some(raw_args) = flag("--args") {
-                match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_args) {
+                match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_args)
+                {
                     Ok(parsed) => map.extend(parsed),
                     Err(e) => {
                         eprintln!("invalid --args JSON: {e}");
@@ -1504,7 +1514,7 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
                     if let Some(arr) = obj.get("calls").and_then(|v| v.as_array()) {
                         map.insert("calls".to_string(), serde_json::Value::Array(arr.clone()));
                     } else {
-                        eprintln!("agent batch JSON must be an array or {{"calls": [...]}}");
+                        eprintln!("agent batch JSON must be an array or {{\"calls\": [...]}}");
                         return ExitCode::FAILURE;
                     }
                 }
@@ -1519,8 +1529,11 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
             if other.starts_with("studio_") {
                 other.to_string()
             } else {
-                eprintln!("unknown agent subcommand {other:?}
-{}", usage());
+                eprintln!(
+                    "unknown agent subcommand {other:?}
+{}",
+                    usage()
+                );
                 return ExitCode::FAILURE;
             }
         }
@@ -1546,13 +1559,21 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
                 }
             }
             if subcmd == "selection" && has_flag("--prompt") {
-                if let Some(p) = res.payload.get("agentContextPrompt").and_then(|v| v.as_str()) {
+                if let Some(p) = res
+                    .payload
+                    .get("agentContextPrompt")
+                    .and_then(|v| v.as_str())
+                {
                     println!("{p}");
                     return ExitCode::SUCCESS;
                 }
             }
             println!("{}", serde_json::to_string_pretty(&res).unwrap());
-            return if res.ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+            return if res.ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            };
         }
     }
 
@@ -1560,7 +1581,11 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
     match kine_studio::bridge_call(&addr, &tool_name, args_val) {
         Ok(res) => {
             if subcmd == "selection" && has_flag("--prompt") {
-                if let Some(p) = res.payload.get("agentContextPrompt").and_then(|v| v.as_str()) {
+                if let Some(p) = res
+                    .payload
+                    .get("agentContextPrompt")
+                    .and_then(|v| v.as_str())
+                {
                     println!("{p}");
                     return ExitCode::SUCCESS;
                 }

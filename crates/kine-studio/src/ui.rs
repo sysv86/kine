@@ -31,7 +31,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use xilem::core::fork;
-use xilem::view::task;
+use xilem::view::task_raw;
 use xilem::{
     masonry::{
         core::ArcStr, parley::style::FontWeight, peniko::ImageBrush,
@@ -154,7 +154,7 @@ pub fn app_logic(state: &mut StudioState) -> impl WidgetView<StudioState> + use<
     fork(
         root_view,
         run_loop.then(|| {
-            task(
+            task_raw(
                 move |proxy| {
                     let pending_flag = bridge_pending.clone();
                     async move {
@@ -737,7 +737,11 @@ fn status_bar(state: &StudioState, t: &StudioPalette) -> impl WidgetView<StudioS
                     None => "BRIDGE OFF".to_string(),
                 },
                 8.5,
-                if state.bridge.is_some() { t.accent_ink } else { t.muted },
+                if state.bridge.is_some() {
+                    t.accent_ink
+                } else {
+                    t.muted
+                },
             )
             .into_any_flex(),
             divider(&t).into_any_flex(),

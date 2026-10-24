@@ -8,7 +8,7 @@
 
 use crate::agent_tools::{agent_tools_json_schema, dispatch_agent_tool, AgentToolResult};
 use crate::state::{StudioError, StudioState};
-use kine_core::NodeId;
+use kine_script::SceneDef;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -97,9 +97,14 @@ impl StudioBridgeServer {
             }
             match bound {
                 Some(l) => l,
-                None => return Err(last_err.unwrap_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::AddrInUse, "no bridge ports available")
-                })),
+                None => {
+                    return Err(last_err.unwrap_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::AddrInUse,
+                            "no bridge ports available",
+                        )
+                    }))
+                }
             }
         };
 
@@ -418,11 +423,7 @@ impl SceneFileWatcher {
 }
 
 fn fnv1a_64(bytes: &[u8], seed: u64) -> u64 {
-    let mut hash = if seed == 0 {
-        0xcbf29ce484222325
-    } else {
-        seed
-    };
+    let mut hash = if seed == 0 { 0xcbf29ce484222325 } else { seed };
     for &b in bytes {
         hash ^= u64::from(b);
         hash = hash.wrapping_mul(0x100000001b3);
@@ -462,11 +463,8 @@ impl StudioState {
     /// Start the live TCP Bridge Server for external CLI agents on `addr` (or default `127.0.0.1:7701`).
     pub fn start_bridge_server(&mut self, addr: Option<&str>) -> Result<String, std::io::Error> {
         let scene_path = self.watched_scene_path();
-        let server = StudioBridgeServer::start(
-            addr,
-            self.workspace_root.as_deref(),
-            scene_path.as_deref(),
-        )?;
+        let server =
+            StudioBridgeServer::start(addr, self.workspace_root.as_deref(), scene_path.as_deref())?;
         let bound = server.addr().to_string();
         self.bridge = Some(server);
         self.notify_status(format!("CLI Agent Bridge active on {bound}"));
@@ -531,15 +529,19 @@ impl StudioState {
                 }
             }
 
+            let event_revision = self.frame_revision;
+            let event_time = self.current_time;
+            let event_frame = self.current_frame_index();
+            let event_selected = self.selected_node.map(|n| n.0);
             if let Some(bridge) = &mut self.bridge {
                 bridge.commands_handled += 1;
                 bridge.last_command_summary = Some(format!("{}: {}", result.tool, result.summary));
 
-                let event_kind = if self.frame_revision != prev_rev {
+                let event_kind = if event_revision != prev_rev {
                     "scene_mutated"
-                } else if self.selected_node != prev_sel {
+                } else if event_selected != prev_sel.map(|n| n.0) {
                     "selection_changed"
-                } else if (self.current_time - prev_time).abs() > 1e-6 {
+                } else if (event_time - prev_time).abs() > 1e-6 {
                     "playhead_changed"
                 } else {
                     "tool_executed"
@@ -547,10 +549,10 @@ impl StudioState {
 
                 bridge.broadcast_event(&BridgeEvent {
                     event: event_kind.to_string(),
-                    frame_revision: self.frame_revision,
-                    current_time: self.current_time,
-                    frame: self.current_frame_index(),
-                    selected_node: self.selected_node.map(|n| n.0),
+                    frame_revision: event_revision,
+                    current_time: event_time,
+                    frame: event_frame,
+                    selected_node: event_selected,
                     summary: result.summary.clone(),
                     payload: json!({
                         "tool": result.tool,
@@ -745,7 +747,8 @@ pub fn bridge_call(addr: &str, tool: &str, args: Value) -> Result<AgentToolResul
             return Ok(tool_res);
         }
     }
-    serde_json::from_value::<AgentToolResult>(v).map_err(|e| format!("invalid bridge response: {e}"))
+    serde_json::from_value::<AgentToolResult>(v)
+        .map_err(|e| format!("invalid bridge response: {e}"))
 }
 
 /// Subscribe to real-time events (`scene_mutated`, `selection_changed`, `playhead_changed`,

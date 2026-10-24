@@ -13,8 +13,7 @@ use crate::timeline::{node_def_badge, node_def_display_label};
 use kine_core::NodeId;
 use kine_render::FrameFormat;
 use kine_script::{
-    AnimationDef, AudioDef, AudioTrackDef, EdgesDef, GradientDef, KeyframeDef, NodeDef, SceneDef,
-    SizeDef,
+    AnimationDef, AudioDef, AudioTrackDef, EdgesDef, GradientDef, KeyframeDef, NodeDef, SizeDef,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -26,8 +25,8 @@ use std::path::Path;
 pub struct AgentToolResult {
     pub ok: bool,
     /// `"verified"`, `"saved"`, or `"refused"`.
-    pub stage: &'static str,
-    pub tool: &'static str,
+    pub stage: String,
+    pub tool: String,
     pub summary: String,
     pub payload: Value,
 }
@@ -36,8 +35,8 @@ impl AgentToolResult {
     pub fn verified(tool: &'static str, summary: impl Into<String>, payload: Value) -> Self {
         Self {
             ok: true,
-            stage: "verified",
-            tool,
+            stage: "verified".to_string(),
+            tool: tool.to_string(),
             summary: summary.into(),
             payload,
         }
@@ -46,8 +45,8 @@ impl AgentToolResult {
     pub fn saved(tool: &'static str, summary: impl Into<String>, payload: Value) -> Self {
         Self {
             ok: true,
-            stage: "saved",
-            tool,
+            stage: "saved".to_string(),
+            tool: tool.to_string(),
             summary: summary.into(),
             payload,
         }
@@ -57,8 +56,8 @@ impl AgentToolResult {
         let msg = reason.into();
         Self {
             ok: false,
-            stage: "refused",
-            tool,
+            stage: "refused".to_string(),
+            tool: tool.to_string(),
             summary: msg.clone(),
             payload: json!({ "error": msg }),
         }
@@ -200,7 +199,10 @@ pub fn studio_selection(state: &StudioState, custom_request: Option<&str>) -> Ag
 
     AgentToolResult::verified(
         "studio_selection",
-        format!("Selected {node_id} [{badge}] ({label}) @ {:.2}s", state.current_time),
+        format!(
+            "Selected {node_id} [{badge}] ({label}) @ {:.2}s",
+            state.current_time
+        ),
         json!({
             "selectedNode": node_id.0,
             "badge": badge,
@@ -219,7 +221,10 @@ pub fn studio_selection(state: &StudioState, custom_request: Option<&str>) -> Ag
 /// 1. `studio_look` — Capture the current rendered frame (`PNG` base64), scene tree, and inspection report.
 pub fn studio_look(state: &mut StudioState) -> AgentToolResult {
     let frame_idx = u64::from(state.current_frame_index());
-    let b64 = match state.engine.render_frame_png_b64(state.scene_handle, frame_idx) {
+    let b64 = match state
+        .engine
+        .render_frame_png_b64(state.scene_handle, frame_idx)
+    {
         Ok(s) => s,
         Err(e) => return AgentToolResult::refused("studio_look", e.to_string()),
     };
@@ -300,7 +305,11 @@ pub fn studio_tree(state: &StudioState) -> AgentToolResult {
 
     AgentToolResult::verified(
         "studio_tree",
-        format!("Scene hierarchy: {} total nodes ({} visible rows)", detailed.len(), rows.len()),
+        format!(
+            "Scene hierarchy: {} total nodes ({} visible rows)",
+            detailed.len(),
+            rows.len()
+        ),
         json!({
             "totalNodes": detailed.len(),
             "selectedNode": state.selected_node.map(|n| n.0),
@@ -510,7 +519,11 @@ pub fn studio_transport(state: &mut StudioState, args: &Value) -> AgentToolResul
     if let Some(lp) = args.get("loop").and_then(Value::as_bool) {
         state.loop_enabled = lp;
     }
-    if let Some(rate) = args.get("rate").or_else(|| args.get("playbackRate")).and_then(Value::as_f64) {
+    if let Some(rate) = args
+        .get("rate")
+        .or_else(|| args.get("playbackRate"))
+        .and_then(Value::as_f64)
+    {
         state.playback_rate = rate.clamp(0.1, 4.0);
     }
     if let Some(fps) = args.get("fps").and_then(Value::as_f64) {
@@ -529,14 +542,22 @@ pub fn studio_transport(state: &mut StudioState, args: &Value) -> AgentToolResul
     if let Some(akf) = args.get("autoKeyframe").and_then(Value::as_bool) {
         state.auto_keyframe = akf;
     }
-    if let Some(ripple) = args.get("ripple").or_else(|| args.get("rippleEdit")).and_then(Value::as_bool) {
+    if let Some(ripple) = args
+        .get("ripple")
+        .or_else(|| args.get("rippleEdit"))
+        .and_then(Value::as_bool)
+    {
         state.ripple_edit = ripple;
     }
 
     let _ = state.render_current_frame();
     state.notify_status(format!(
         "CLI Bridge: transport {} @ {:.2}s ({:.0}fps, {:.2}x)",
-        if state.is_playing { "PLAYING" } else { "PAUSED" },
+        if state.is_playing {
+            "PLAYING"
+        } else {
+            "PAUSED"
+        },
         state.current_time,
         state.fps,
         state.playback_rate
@@ -546,7 +567,11 @@ pub fn studio_transport(state: &mut StudioState, args: &Value) -> AgentToolResul
         "studio_transport",
         format!(
             "Transport {} · {:.2}s (F{}/{}) · {:.0}fps · rate {:.2}x · loop={}",
-            if state.is_playing { "playing" } else { "paused" },
+            if state.is_playing {
+                "playing"
+            } else {
+                "paused"
+            },
             state.current_time,
             state.current_frame_index(),
             state.total_frames(),
@@ -829,7 +854,10 @@ pub fn studio_add_node(state: &mut StudioState, args: &Value) -> AgentToolResult
             format!("parent node {parent_id} not found in scene"),
         );
     };
-    let insert_idx = args.get("index").and_then(Value::as_u64).map(|i| i as usize);
+    let insert_idx = args
+        .get("index")
+        .and_then(Value::as_u64)
+        .map(|i| i as usize);
     let kind_label = node_def.kind.clone().unwrap_or_else(|| "node".to_string());
     let undo_label = args
         .get("undoLabel")
@@ -893,7 +921,10 @@ pub fn studio_delete_node(
         );
     }
     let Some(path) = state.path_for_node(target) else {
-        return AgentToolResult::refused("studio_delete_node", format!("node #{node_id} not found"));
+        return AgentToolResult::refused(
+            "studio_delete_node",
+            format!("node #{node_id} not found"),
+        );
     };
     let Some((&child_idx, parent_path)) = path.split_last() else {
         return AgentToolResult::refused("studio_delete_node", "invalid root path");
@@ -926,7 +957,10 @@ pub fn studio_delete_node(
 
     AgentToolResult::verified(
         "studio_delete_node",
-        format!("Deleted node #{node_id} ({} nodes remaining)", state.node_paths().len()),
+        format!(
+            "Deleted node #{node_id} ({} nodes remaining)",
+            state.node_paths().len()
+        ),
         json!({
             "deletedNodeId": node_id,
             "remainingNodes": state.node_paths().len(),
@@ -959,16 +993,15 @@ pub fn studio_duplicate_node(state: &mut StudioState, node_id: u64) -> AgentTool
 }
 
 /// `studio_reorder_node` — Move `node_id` up (`delta < 0`) or down (`delta > 0`) in sibling Z-order.
-pub fn studio_reorder_node(
-    state: &mut StudioState,
-    node_id: u64,
-    delta: isize,
-) -> AgentToolResult {
+pub fn studio_reorder_node(state: &mut StudioState, node_id: u64, delta: isize) -> AgentToolResult {
     let target = NodeId(node_id);
     match state.layer_move_z_order(target, delta) {
         Ok(()) => AgentToolResult::verified(
             "studio_reorder_node",
-            format!("Reordered #{node_id} by {delta:+} -> path {:?}", state.path_for_node(target)),
+            format!(
+                "Reordered #{node_id} by {delta:+} -> path {:?}",
+                state.path_for_node(target)
+            ),
             json!({
                 "nodeId": node_id,
                 "delta": delta,
@@ -1399,7 +1432,10 @@ pub fn studio_set_shader(state: &mut StudioState, node_id: u64, args: &Value) ->
         }
     }
 
-    let blend_opt = args.get("blend").and_then(Value::as_str).map(str::to_string);
+    let blend_opt = args
+        .get("blend")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let uniforms_opt = args.get("uniforms").and_then(Value::as_object).cloned();
 
     let src_clone = shader_src.clone();
@@ -1464,48 +1500,52 @@ pub fn studio_audio(state: &mut StudioState, args: &Value) -> AgentToolResult {
             let trim_end = args.get("trimEnd").and_then(Value::as_f64);
             let fade_in = args.get("fadeIn").and_then(Value::as_f64).unwrap_or(0.1);
             let fade_out = args.get("fadeOut").and_then(Value::as_f64).unwrap_or(0.2);
-            let highpass_hz = args.get("highpassHz").and_then(Value::as_f64).map(|v| v as f32);
-            let lowpass_hz = args.get("lowpassHz").and_then(Value::as_f64).map(|v| v as f32);
+            let highpass_hz = args
+                .get("highpassHz")
+                .and_then(Value::as_f64)
+                .map(|v| v as f32);
+            let lowpass_hz = args
+                .get("lowpassHz")
+                .and_then(Value::as_f64)
+                .map(|v| v as f32);
             let duck_db = args.get("duckDb").and_then(Value::as_f64).unwrap_or(0.0) as f32;
             let muted = args.get("muted").and_then(Value::as_bool).unwrap_or(false);
             let loop_track = args.get("loop").and_then(Value::as_bool).unwrap_or(false);
 
             let src_clone = src.clone();
-            if let Err(e) = state.commit_mutation(format!("Agent: add audio track {src}"), move |def| {
-                let audio = def.audio.get_or_insert_with(|| AudioDef {
-                    sample_rate: 48_000,
-                    channels: 2,
-                    normalize_peak_db: Some(-1.0),
-                    tracks: Vec::new(),
-                });
-                audio.tracks.push(AudioTrackDef {
-                    src: src_clone,
-                    gain_db,
-                    start,
-                    trim_start,
-                    trim_end,
-                    loop_track,
-                    pan,
-                    fade_in,
-                    fade_out,
-                    fade_curve: Some("equalPower".to_string()),
-                    highpass_hz,
-                    lowpass_hz,
-                    eq: None,
-                    compressor: None,
-                    duck_db,
-                    duck_threshold_db: None,
-                    muted,
-                });
-                Ok(())
-            }) {
+            if let Err(e) =
+                state.commit_mutation(format!("Agent: add audio track {src}"), move |def| {
+                    let audio = def.audio.get_or_insert_with(|| AudioDef {
+                        sample_rate: 48_000,
+                        channels: 2,
+                        normalize_peak_db: Some(-1.0),
+                        tracks: Vec::new(),
+                    });
+                    audio.tracks.push(AudioTrackDef {
+                        src: src_clone,
+                        gain_db,
+                        start,
+                        trim_start,
+                        trim_end,
+                        loop_track,
+                        pan,
+                        fade_in,
+                        fade_out,
+                        fade_curve: Some("equalPower".to_string()),
+                        highpass_hz,
+                        lowpass_hz,
+                        eq: None,
+                        compressor: None,
+                        duck_db,
+                        duck_threshold_db: None,
+                        muted,
+                    });
+                    Ok(())
+                })
+            {
                 return AgentToolResult::refused("studio_audio", e.to_string());
             }
-            let count = state
-                .scene_def
-                .audio
-                .as_ref()
-                .map_or(0, |a| a.tracks.len());
+            let count = state.scene_def.audio.as_ref().map_or(0, |a| a.tracks.len());
             AgentToolResult::verified(
                 "studio_audio",
                 format!("Added audio track #{}: {}", count.saturating_sub(1), src),
@@ -1578,7 +1618,9 @@ pub fn studio_audio(state: &mut StudioState, args: &Value) -> AgentToolResult {
             if let Err(e) =
                 state.commit_mutation(format!("Agent: remove audio track #{idx}"), move |def| {
                     let Some(audio) = &mut def.audio else {
-                        return Err(StudioError::Message("scene has no audio tracks".to_string()));
+                        return Err(StudioError::Message(
+                            "scene has no audio tracks".to_string(),
+                        ));
                     };
                     if idx >= audio.tracks.len() {
                         return Err(StudioError::Message(format!(
@@ -1931,11 +1973,18 @@ pub fn dispatch_agent_tool(
     match tool_name {
         "studio_status" | "studio_context" => studio_status(state),
         "studio_selection" => {
-            let req = args.get("request").or_else(|| args.get("prompt")).and_then(Value::as_str);
+            let req = args
+                .get("request")
+                .or_else(|| args.get("prompt"))
+                .and_then(Value::as_str);
             studio_selection(state, req)
         }
         "studio_look" => {
-            if let Some(out_path) = args.get("outPath").or_else(|| args.get("out")).and_then(Value::as_str) {
+            if let Some(out_path) = args
+                .get("outPath")
+                .or_else(|| args.get("out"))
+                .and_then(Value::as_str)
+            {
                 if let Err(e) = state.capture_current_frame(FrameFormat::Png, Path::new(out_path)) {
                     return AgentToolResult::refused("studio_look", e.to_string());
                 }
@@ -1983,7 +2032,10 @@ pub fn dispatch_agent_tool(
             match state.resize_canvas(w, h) {
                 Ok(()) => AgentToolResult::verified(
                     "studio_resize_canvas",
-                    format!("Resized canvas to {}x{}", state.scene_def.width, state.scene_def.height),
+                    format!(
+                        "Resized canvas to {}x{}",
+                        state.scene_def.width, state.scene_def.height
+                    ),
                     json!({
                         "width": state.scene_def.width,
                         "height": state.scene_def.height,
@@ -2011,8 +2063,14 @@ pub fn dispatch_agent_tool(
             studio_toggle_visibility(state, node_id, vis)
         }
         "studio_align_node" => {
-            let h = args.get("horizontal").or_else(|| args.get("h")).and_then(Value::as_str);
-            let v = args.get("vertical").or_else(|| args.get("v")).and_then(Value::as_str);
+            let h = args
+                .get("horizontal")
+                .or_else(|| args.get("h"))
+                .and_then(Value::as_str);
+            let v = args
+                .get("vertical")
+                .or_else(|| args.get("v"))
+                .and_then(Value::as_str);
             studio_align_node(state, node_id, h, v)
         }
         "studio_set_text" => {
@@ -2123,11 +2181,17 @@ pub fn dispatch_agent_tool(
             None => AgentToolResult::refused("studio_redo", "redo stack is empty"),
         },
         "studio_history" => {
-            let undo_labels: Vec<&str> = state.undo_stack.iter().map(|e| e.label.as_str()).collect();
-            let redo_labels: Vec<&str> = state.redo_stack.iter().map(|e| e.label.as_str()).collect();
+            let undo_labels: Vec<&str> =
+                state.undo_stack.iter().map(|e| e.label.as_str()).collect();
+            let redo_labels: Vec<&str> =
+                state.redo_stack.iter().map(|e| e.label.as_str()).collect();
             AgentToolResult::verified(
                 "studio_history",
-                format!("History: {} undo, {} redo entries", undo_labels.len(), redo_labels.len()),
+                format!(
+                    "History: {} undo, {} redo entries",
+                    undo_labels.len(),
+                    redo_labels.len()
+                ),
                 json!({
                     "undoCount": undo_labels.len(),
                     "redoCount": redo_labels.len(),
@@ -2319,7 +2383,10 @@ pub fn dispatch_agent_tool(
             for call in calls {
                 let Some(t_name) = call.get("tool").and_then(Value::as_str) else {
                     all_ok = false;
-                    results.push(AgentToolResult::refused("studio_batch", "missing 'tool' name"));
+                    results.push(AgentToolResult::refused(
+                        "studio_batch",
+                        "missing 'tool' name",
+                    ));
                     continue;
                 };
                 let t_args = call.get("args").cloned().unwrap_or_else(|| call.clone());
@@ -2335,8 +2402,8 @@ pub fn dispatch_agent_tool(
             );
             AgentToolResult {
                 ok: all_ok,
-                stage: if all_ok { "verified" } else { "refused" },
-                tool: "studio_batch",
+                stage: if all_ok { "verified" } else { "refused" }.to_string(),
+                tool: "studio_batch".to_string(),
                 summary,
                 payload: json!({ "results": results }),
             }
