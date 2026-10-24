@@ -1,20 +1,24 @@
 # Kine — Video-as-Code Engine & Native Xilem Studio
 
-Kine is a deterministic, self-contained **Video-as-Code** engine and **native Rust Xilem Studio** (`kine-studio`) targeting **Linux**, **Windows**, and **macOS**.
+Kine is a deterministic **Video-as-Code** engine, headless session/bridge library (`kine-session`), and **native Rust Xilem Studio** (`kine-studio`) targeting **Linux**, **Windows**, and **macOS**.
+
+**Self-contained pipeline: zero system C-library dependencies (embedded QuickJS compiled via cc).**
 
 ## Supported Platforms
 
-| Platform | Architectures | Portable Default Pipeline | Optional GPU / Hardware Video (`--features gpu,hwencode`) |
+| Platform | Architectures | Portable Default Pipeline | Optional GPU / Hardware Video (`--features gpu,hwencode,asm`) |
 | :--- | :--- | :--- | :--- |
-| **Linux** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 + Xilem (Wayland/X11) | Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 |
-| **Windows** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 + Xilem (Win32/DX12) | DirectX 12 / Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 |
-| **macOS** | `aarch64` (Apple Silicon), `x86_64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 + Xilem (AppKit/Metal) | Metal (`wgpu` + `vello_gpu`) + VideoToolbox H.264 |
+| **Linux** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 VVC | Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 + NASM `asm` |
+| **Windows** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 VVC | DirectX 12 / Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 + NASM `asm` |
+| **macOS** | `aarch64` (Apple Silicon), `x86_64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 VVC | Metal (`wgpu` + `vello_gpu`) + VideoToolbox H.264 + GAS `asm` |
 
-The default build uses a 100% deterministic software rendering and encoding pipeline (`taffy` layout, `cosmic-text` shaping, `vello_cpu` sparse-strip rasterization, `naga` CPU WGSL shader VM, `rav1e` AV1 software encoder, `symphonia`/`rubato`/`flacenc` audio DSP, and `muxfin`/`mkv` container muxing) so every test and render produces identical results on headless Linux servers, Windows workstations, and macOS laptops.
+The default CLI build (`cargo build -p kine-cli`) compiles a headless, minimal dependency graph without Xilem, Winit, Wayland, or X11 system libraries (`taffy` layout, `cosmic-text` shaping, `vello_cpu` sparse-strip rasterization, `naga` CPU WGSL shader VM, `rav1e` AV1 and software H.266 / VVC encoders, `symphonia`/`rubato`/`flacenc` audio DSP, and `muxfin`/`mkv` container muxing).
 
-## Kine Studio (`crates/kine-studio`)
+## Kine Studio (`crates/kine-studio`) & Headless Session (`crates/kine-session`)
 
-`kine-studio` is a full-featured visual composition editor, NLE timeline, node/shader inspector, and real-time CLI agent bridge studio inspired by **Hyperframes Studio**, written in pure Rust on **Xilem `0.4.0`** (Linebender's reactive UI architecture built on `masonry`, `vello`, `peniko`, `parley`, and `winit`).
+All headless Studio state (`StudioState`), NLE timeline track construction (`timeline.rs`), node/shader inspection (`inspector.rs`), preset catalog (`catalog.rs`), the 34 `studio_*` tools (`agent_tools.rs`), and the TCP bridge server (`bridge.rs`) live in `crates/kine-session` with zero GUI toolkit dependencies.
+
+`crates/kine-studio` contains only the reactive **Xilem `0.4.0`** desktop view tree (`masonry`, `vello`, `peniko`, `parley`, and `winit`) layered over `kine-session`.
 
 ### Key Studio Capabilities
 
@@ -37,35 +41,50 @@ The default build uses a 100% deterministic software rendering and encoding pipe
    - **Right Dock**:
      - `Design` Inspector: Computed bounding box (`X`, `Y`, `W`, `H`), canvas alignment buttons, position/size nudges, opacity slider, rotation & scale steppers, hex color & swatch picker, corner radius, typography controls, and animation track easing curves (`linear`, `easeOut`, `easeOutCubic`, `spring`).
      - `Layers` Tree: Hierarchical Z-ordered scene graph with visibility toggles (`👁`/`🚫`) and sibling Z-order reordering (`↑`/`↓`).
-   - **Real-Time External CLI Agent Bridge (`crates/kine-studio/src/bridge.rs`)**:
-     - Kine Studio deliberately omits any built-in LLM chat wrapper. External CLI agents (Claude Code / **Claude Opus 5.5**, Codex / **GPT-6 Astra**, Gemini CLI / **Gemini Argon 4**, OpenCode) run in a separate terminal or window and control Kine Studio in real time over a bidirectional TCP bridge (`127.0.0.1:7701`, auto-discovered via `.kine-studio-bridge.json`) or via live file hot-reloading (`SceneFileWatcher`):
+   - **Real-Time External CLI Agent Bridge (`crates/kine-session/src/bridge.rs`)**:
+     - Kine Studio deliberately omits any built-in chat wrapper. External CLI agents run in a separate terminal or window and control Kine Studio in real time over a bidirectional TCP bridge (`127.0.0.1:7701`, auto-discovered via `.kine-studio-bridge.json`) or via live file hot-reloading (`SceneFileWatcher`). End-to-end pipeline and bridge throughput metrics are published in the [Benchmarks](#benchmarks) table below:
        - **State, Selection & Inspection**: `studio_status`, `studio_selection`, `studio_look`, `studio_tree`, `studio_timeline`, `studio_inspect`
        - **Node Hierarchy & Alignment**: `studio_add_node`, `studio_delete_node`, `studio_duplicate_node`, `studio_reorder_node`, `studio_toggle_visibility`, `studio_align_node`
        - **Content, Style, Transform, WGSL Shaders & Audio**: `studio_set_text`, `studio_set_style`, `studio_transform`, `studio_set_shader`, `studio_audio`
        - **Timeline, Keyframes & Transport**: `studio_seek`, `studio_frame`, `studio_transport`, `studio_resize_canvas`, `studio_add_animation`, `studio_update_animation`, `studio_add_keyframe`, `studio_delete_keyframe`, `studio_delete_animation`, `studio_shift_time`, `studio_split`
        - **History, Scene I/O, Export & Atomic Batching**: `studio_undo`, `studio_redo`, `studio_history`, `studio_load_scene`, `studio_reload`, `studio_apply_source`, `studio_save_scene`, `studio_switch_composition`, `studio_new_composition`, `studio_export`, `studio_batch`
-     - `Renders` Queue: In-process multi-format export (`MP4`, `MKV`, `WebM`, `GIF`, `PNG`) with frame count, byte size, and output path history.
+     - `Renders` Queue: In-process multi-format export (`MP4` AV1 or H.266/VVC, `MKV` AV1 or H.266/VVC, `WebM`, `GIF`, `PNG`) with frame count, byte size, and output path history.
 
-### Launching Kine Studio
+## Benchmarks
 
-Kine Studio is **GPU-first**: the default features enable the `gpu` pipeline and the
-`auto` backend selects Vulkan/Metal/DX12 when an adapter is present, falling back to the
-deterministic CPU path otherwise. Always use the optimized profile for interactive
-preview — a debug build spends most of its frame budget in unoptimized scene evaluation:
+The benchmark table below is populated **only** when the manual **Benchmark (`workflow_dispatch`)** GitHub Actions workflow (`.github/workflows/benchmark.yml`) is triggered (`gh workflow run benchmark.yml` or via the GitHub Actions UI). It does not run automatically on push or pull_request.
+
+<!-- BENCHMARK_TABLE_START -->
+| Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |
+| :--- | :--- | ---: | ---: | ---: | :--- |
+| _Pending manual `workflow_dispatch` run_ | Run `.github/workflows/benchmark.yml` (`gh workflow run benchmark.yml`) to populate live CI benchmark results | — | — | — | `workflow_dispatch` |
+<!-- BENCHMARK_TABLE_END -->
+
+To run the benchmark locally or update the table manually:
 
 ```bash
-# Recommended: release build + GPU (also what scripts/studio.sh does)
+cargo run --release -p kine-cli -- bench --markdown
+cargo run --release -p kine-cli -- bench --update-readme README.md
+```
+
+### Building & Launching
+
+```bash
+# Minimal headless CLI build (no Xilem/Winit/Wayland/X11 dependencies)
+cargo build --release -p kine-cli
+
+# Server build with NASM assembly acceleration for rav1e
+cargo build --release -p kine-cli --features asm
+
+# Render with software H.266 / VVC (ISO-BMFF vvc1/vvcC MP4 or Matroska V_MPEGH/ISO/VVC MKV)
+cargo run --release -p kine-cli -- render --scene examples/hello/scene.ts --out out.mp4 --encoder h266
+cargo run --release -p kine-cli -- render --scene examples/hello/scene.ts --out out.mkv --encoder vvc
+
+# Launch desktop Kine Studio (standalone binary or CLI with studio-ui feature)
 cargo run --release -p kine-studio -- --scene examples/hello/scene.ts
-./scripts/studio.sh --scene examples/motion/scene.ts
+cargo run --release -p kine-cli --features studio-ui -- studio --scene examples/hello/scene.ts
 
-# Launch via the kine CLI
-cargo run --release -p kine-cli -- studio
-cargo run --release -p kine-cli -- studio --scene examples/hello/scene.ts
-
-# Start with transport already playing (useful for capture/demo)
-cargo run --release -p kine-studio -- --scene examples/hello/scene.ts --play
-
-# Run a headless verification check (for CI or automated agents)
+# Run a headless verification check (zero X11/Wayland required)
 cargo run --release -p kine-cli -- studio --headless-check
 
 # Control a running Kine Studio window in real time from an external CLI agent
@@ -77,9 +96,6 @@ kine agent transform --node 2 --dx 24 --dy -12 --scale 1.1
 kine agent animate --node 3 --prop rotation --from 0 --to 360 --start 0 --end 2.0 --easing easeInOutCubic
 kine agent watch
 ```
-
-The status bar shows the active backend and last rasterization time (`GPU · 5.4ms`).
-CPU is a fallback, not the default. Builds without `gpu` still work and print `CPU`.
 
 ## Modules
 
@@ -107,29 +123,6 @@ optional:
 }
 ```
 
-`kind` is free-form (`subtitle`, `widget`, `transition`, `animation`, ...).
-`params` are the module's default props: they are merged under the call-site
-props, so `module("lower-third")` gets `UNTITLED` while
-`module("lower-third", { title: "Hello" })` overrides it. `scene.ts` must
-evaluate to a factory that takes the props and returns one scene node:
-
-```ts
-return (props) => container(
-  { position: "absolute", inset: { left: 40, bottom: 40 }, size: { width: 420, height: 72 } },
-  [
-    rect({ fill: props.accent || "#f5b642", size: { width: 8, height: 72 } }),
-    text(props.title || "UNTITLED", {
-      fontFamily: "JetBrains Mono",
-      fontSize: 34,
-      color: "#ffffff",
-      position: "absolute",
-      inset: { left: 24, top: 8 },
-      size: { width: 380, height: 44 },
-    }),
-  ]
-);
-```
-
 Use it like any other node; the module sees the same DSL globals as the scene:
 
 ```ts
@@ -137,13 +130,6 @@ container({ size: { width: W, height: H } }, [
   module("lower-third", { title: "MODULE OK", subtitle: "ready-made element" }),
 ]);
 ```
-
-Rules:
-
-* the module name is its directory name (`Modules/lower-third` → `module("lower-third")`);
-* `module.json` is optional, `scene.ts` is not;
-* unknown or broken modules fail scene load with an error listing what is available;
-* modules are evaluated per scene load, before the scene body, so a scene can use any module without imports.
 
 List what a project offers:
 
@@ -154,14 +140,15 @@ kine modules --dir ./project
 ## Workspace Architecture
 
 - `crates/kine-core` — Scene graph (`Scene`, `Node`, `NodeKind`), `taffy` layout integration, and keyframe animation curves (`Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `CubicBezier`, `Steps`, analytical `Spring`).
-- `crates/kine-text` — Pure-Rust font loading and text shaping (`cosmic-text`).
+- `crates/kine-text` — Self-contained font loading and text shaping (`cosmic-text`).
 - `crates/kine-shader` — WGSL shader validation (`naga`), uniform reflection, and deterministic multi-threaded CPU WGSL fragment VM.
 - `crates/kine-render` — Unified CPU (`vello_cpu`) and optional GPU (`vello_gpu` + `wgpu`) frame renderer, procedural/container video input cache, and multi-format still export (`PNG`, `QOI`, `BMP`, `PPM`, `PAM`, `TGA`, `GIF89a`).
-- `crates/kine-encode` — Software AV1 (`rav1e`), `YUV4MPEG2` (`.y4m`), raw `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
+- `crates/kine-encode` — Software AV1 (`rav1e`, with optional `asm` NASM/GAS feature), software H.266 / VVC (`vvc`, ITU-T H.266 Annex-B), `YUV4MPEG2` (`.y4m`), 16-bit fixed-point BT.709 `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
 - `crates/kine-audio` — Waveform synthesis, file decoding (`symphonia`), resampling (`rubato`), biquad EQ, dynamic range compression, sidechain ducking, and `WAV`/`FLAC`/`AIFF` output.
-- `crates/kine-mux` — ISO-BMFF `.mp4` (`muxfin`) and Matroska `.mkv` / `.webm` muxers, plus optional hardware H.264 encoding (`gpu-video`).
-- `crates/kine-script` — TypeScript stripping (`oxc`), embedded QuickJS (`rquickjs`) evaluation, and JSON/TS scene authoring schema (`SceneDef`, `NodeDef`).
+- `crates/kine-mux` — ISO-BMFF `.mp4` (`av01`, `vvc1`/`vvcC`, `avc1`, `dfLa` FLAC) and Matroska `.mkv` / `.webm` (`V_AV1`, `V_MPEGH/ISO/VVC`, `V_MPEG4/ISO/AVC`, `A_FLAC`) muxers, plus optional hardware H.264 encoding (`gpu-video`).
+- `crates/kine-script` — TypeScript stripping (`oxc`), embedded QuickJS (`rquickjs`, compiled via `cc`) evaluation, and JSON/TS scene authoring schema (`SceneDef`, `NodeDef`).
 - `crates/kine-platform` — Host OS detection (`Linux`, `Windows`, `macOS`) and output path resolution (`KINE_OUTPUT_DIR`).
 - `crates/kine-server` — In-process `Engine` API, static scene inspector, snapshot pixel-diff gate, and newline-delimited JSON-RPC TCP server.
-- `crates/kine-studio` — Native Rust **Xilem** GUI studio (`StudioState`, NLE timeline, node/shader inspector, live `StudioBridgeServer`, `SceneFileWatcher`, and 34 `studio_*` agent bridge tools) living in-process with `kine-server::Engine`.
-- `crates/kine-cli` — Non-interactive `kine` command-line binary, `kine studio` launcher, and `kine agent` real-time CLI bridge controller.
+- `crates/kine-session` — Headless `StudioState`, NLE timeline builder (`timeline.rs`), node/shader inspector (`inspector.rs`), preset catalog (`catalog.rs`), `StudioBridgeServer` (`bridge.rs`), `SceneFileWatcher`, and 34 `studio_*` agent tools (`agent_tools.rs`) with zero GUI dependencies.
+- `crates/kine-studio` — Native Rust **Xilem** desktop view tree and window runner layered over `kine-session`.
+- `crates/kine-cli` — Minimal headless `kine` CLI binary (`default = ["gpu"]`, no Xilem/Wayland/X11 dependencies by default; optional `studio-ui` and `asm` features).

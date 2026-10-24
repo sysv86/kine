@@ -2531,7 +2531,7 @@ pub fn build_element_agent_prompt(
     )
 }
 
-/// JSON Schema declarations for all `studio_*` bridge tools for external CLI agents (Opus 5.5, GPT-6 Astra, Gemini Argon 4).
+/// JSON Schema declarations for all `studio_*` bridge tools for external CLI agents.
 pub fn agent_tools_json_schema() -> Value {
     json!([
         { "name": "studio_status", "description": "Return full live Studio state (composition, playhead, canvas, selection, findings, undo depth, bridge address)." },

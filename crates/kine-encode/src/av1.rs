@@ -1,4 +1,4 @@
-//! AV1 encoding via `rav1e` (pure Rust — no C codec is linked anywhere).
+//! AV1 encoding via `rav1e` (optional `asm` feature enables NASM/GAS assembly kernels).
 
 use crate::{color::rgba_to_i420, AccessUnit, EncodeError, EncodeOutput};
 use rav1e::prelude::*;

@@ -85,7 +85,7 @@ All measurements snap to a `4px` spatial grid with three user-selectable density
 4. **Right Inspector Dock**: Segmented pill strip (`Design`, `Layers`, `Renders`) with cascading collapsible property cards (`Layout & Geometry`, `2D Transform`, `Appearance & Fill`, `Stroke & Drop Shadow`, `Typography`, `Keyframes & Motion`, `WGSL Shaders & Uniforms`, `Audio Bed DSP`).
 5. **Modal Overlay Layer (`ZStack` / Workspace View)**:
    - **Settings Window (`SettingsTab`)**: 5-tab configuration dialog (`Appearance & UI`, `Editor & Viewport`, `Timeline & Playback`, `Engine & Export`, `Keyboard Shortcuts`) with instant live preview and JSON persistence (`studio-settings.json`).
-   - **External CLI Agent Bridge (`127.0.0.1:7701`)**: No in-app chat wrapper. External CLI agents (Claude Opus 5.5, GPT-6 Astra, Gemini Argon 4) run in a separate terminal/window and mutate or inspect `StudioState` in real time over the TCP bridge (`kine agent ...`) or via watched disk files.
+   - **External CLI Agent Bridge (`127.0.0.1:7701`)**: No in-app chat wrapper. External CLI agents run in a separate terminal/window and mutate or inspect `StudioState` in real time over the TCP bridge (`kine agent ...`) or via watched disk files.
 
 ---
 

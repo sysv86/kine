@@ -1,4 +1,4 @@
-//! Multi-format still image and animated GIF89a encoders/decoders in pure Rust:
+//! Self-contained multi-format still image and animated GIF89a encoders/decoders:
 //! * **PNG** (`.png`) — straight-alpha RGBA8 via `image`.
 //! * **QOI** (`.qoi`) — Quite OK Image v1.0 lossless O(N) RGBA8 encoder & decoder.
 //! * **BMP** (`.bmp`) — 32-bit BGRA BITMAPINFOHEADER encoder & 24/32-bit decoder.

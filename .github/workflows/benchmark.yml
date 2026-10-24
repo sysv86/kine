@@ -1,0 +1,88 @@
+name: Benchmark (Manual Only)
+
+# Triggered strictly via manual action (GitHub UI "Run workflow" or `gh workflow run benchmark.yml`).
+# Never runs automatically on push or pull_request.
+on:
+  workflow_dispatch:
+    inputs:
+      enable_asm:
+        description: "Build kine-cli with NASM rav1e assembly acceleration (--features asm)"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      commit_readme:
+        description: "Commit and push the updated benchmark table to README.md"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  benchmark:
+    name: Run Pipeline Benchmark & Update README
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install NASM (optional, for --features asm)
+        if: inputs.enable_asm == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build headless kine-cli (--release, zero X11/Wayland packages)
+        run: |
+          if [ "${{ inputs.enable_asm }}" = "true" ]; then
+            cargo build --release -p kine-cli --features asm
+          else
+            cargo build --release -p kine-cli
+          fi
+
+      - name: Run benchmark and populate README.md table
+        run: |
+          ./target/release/kine bench --update-readme README.md | tee benchmark-table.md
+          {
+            echo "## Kine Pipeline Benchmark Results"
+            echo ""
+            cat benchmark-table.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kine-benchmark-table
+          path: benchmark-table.md
+
+      - name: Commit updated README.md benchmark table
+        if: inputs.commit_readme == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet README.md; then
+            git add README.md
+            git commit -m "docs(readme): update benchmark table from manual workflow_dispatch run"
+            git push
+          else
+            echo "README.md benchmark table is already up to date."
+          fi

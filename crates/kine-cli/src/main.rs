@@ -65,6 +65,8 @@ USAGE:
                   reload | apply (--file <f>|--inline <s>) | save [--out <path>] |
                   export [--format <fmt>] [--out <path>] | call --tool <name> [--args <json>] |
                   batch (--file <f>|--inline <json>) | schema | watch
+  kine bench      [--markdown] [--update-readme <README.md>]
+                                              run pipeline benchmarks and optionally update README table
   kine serve      [--listen 127.0.0.1:7700]
 "
 }
@@ -847,6 +849,8 @@ fn main() -> ExitCode {
 
         "agent" | "bridge" => run_agent_cli(&args[1..], engine.backend()),
 
+        "bench" | "benchmark" => run_bench_cli(&args[1..], &mut engine),
+
         "serve" => {
             let addr = flag_or("--listen", "127.0.0.1:7700");
             match kine_server::rpc::serve(&addr, &mut engine) {
@@ -988,6 +992,181 @@ fn starter_scene_json() -> String {
         }
     });
     serde_json::to_string_pretty(&def).unwrap()
+}
+
+
+fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
+    use std::time::Instant;
+
+    let flag = |name: &str| -> Option<String> {
+        sub_args
+            .iter()
+            .position(|a| a == name)
+            .and_then(|i| sub_args.get(i + 1))
+            .cloned()
+    };
+    let has_flag = |name: &str| -> bool { sub_args.iter().any(|a| a == name) };
+
+    let starter = starter_scene_json();
+    let handle = match engine.load_scene_json(&starter) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("bench scene load error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // 1. Scene JSON/DSL load + inspect
+    let t0 = Instant::now();
+    let iters_load = 20u32;
+    for _ in 0..iters_load {
+        let h = engine.load_scene_json(&starter).expect("load scene");
+        let _ = engine.inspect(h).expect("inspect");
+    }
+    let load_ms = t0.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_load);
+
+    // 2. CPU 1280x720 rasterization (vello_cpu + text shaping)
+    let t1 = Instant::now();
+    let iters_raster = 10u64;
+    let mut last_rgba = Vec::new();
+    for f in 0..iters_raster {
+        let px = engine
+            .render_frame_at_with_index(handle, (f as f64) / 30.0, f as u32)
+            .expect("raster frame");
+        if last_rgba.is_empty() {
+            last_rgba = px.data_as_u8_slice().to_vec();
+        }
+    }
+    let raster_ms = t1.elapsed().as_secs_f64() * 1000.0 / (iters_raster as f64);
+
+    // 3. BT.709 16-bit fixed-point RGBA -> I420 + NV12 (1280x720)
+    let t2 = Instant::now();
+    let iters_color = 20u32;
+    for _ in 0..iters_color {
+        let _ = kine_server::rgba_to_i420_bench_shim(&last_rgba, 1280, 720);
+    }
+    let color_ms = t2.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_color);
+
+    // 4. H.266 / VVC software encode + MP4 (vvc1/vvcC) mux (12 frames)
+    let mut vvc_opts = VideoOptions::default();
+    vvc_opts.encoder = VideoEncoder::H266Software;
+    vvc_opts.container = VideoContainer::Mp4;
+    vvc_opts.frames = 12;
+    vvc_opts.fps_num = 30;
+    vvc_opts.quantizer = 100;
+    vvc_opts.speed = 9;
+    let t3 = Instant::now();
+    let vvc_report = match kine_server::render_video(engine, handle, &vvc_opts) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("bench h266 error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let vvc_total_ms = t3.elapsed().as_secs_f64() * 1000.0;
+    let vvc_fps = (vvc_opts.frames as f64) / (vvc_total_ms / 1000.0).max(1e-6);
+
+    // 5. AV1 (rav1e) software encode + MP4 (av01) mux (12 frames)
+    let mut av1_opts = VideoOptions::default();
+    av1_opts.encoder = VideoEncoder::Av1Software;
+    av1_opts.container = VideoContainer::Mp4;
+    av1_opts.frames = 12;
+    av1_opts.fps_num = 30;
+    av1_opts.quantizer = 120;
+    av1_opts.speed = 10;
+    let t4 = Instant::now();
+    let av1_report = match kine_server::render_video(engine, handle, &av1_opts) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("bench av1 error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let av1_total_ms = t4.elapsed().as_secs_f64() * 1000.0;
+    let av1_fps = (av1_opts.frames as f64) / (av1_total_ms / 1000.0).max(1e-6);
+
+    // 6. Headless StudioState agent tool dispatch (`studio_status` + `studio_transform`)
+    let mut studio = kine_session::StudioState::new(None);
+    studio.engine.set_backend(RenderBackend::Cpu);
+    let t5 = Instant::now();
+    let iters_bridge = 20u32;
+    for _ in 0..iters_bridge {
+        let _ = kine_session::dispatch_agent_tool(&mut studio, "studio_status", &serde_json::json!({}));
+    }
+    let bridge_ms = t5.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_bridge);
+
+    let doc = engine.doctor();
+    let md_table = format!(
+        "| Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |\n         | :--- | :--- | ---: | ---: | ---: | :--- |\n         | **Scene Parse + Static Inspect** | 1280×720 AST | `{load_ms:.2} ms/op` | `{:.1} ops/s` | — | `{}` (`{}`) |\n         | **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `{raster_ms:.2} ms/frame` | `{:.1} fps` | `3,686,400 B` | `{}` |\n         | **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `{color_ms:.2} ms/frame` | `{:.1} fps` | `1,382,400 B` | `16-bit int + MT` |\n         | **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | `{:.2} ms/frame` | `{vvc_fps:.1} fps` | `{} B` | `software VVC` |\n         | **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `{:.2} ms/frame` | `{av1_fps:.1} fps` | `{} B` | `rav1e (asm={})` |\n         | **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `{bridge_ms:.2} ms/call` | `{:.1} calls/s` | — | `in-process` |",
+        1000.0 / load_ms.max(1e-6),
+        doc.platform,
+        std::env::consts::ARCH,
+        1000.0 / raster_ms.max(1e-6),
+        doc.renderer,
+        1000.0 / color_ms.max(1e-6),
+        vvc_total_ms / (vvc_opts.frames as f64),
+        vvc_report.bytes.len(),
+        av1_total_ms / (av1_opts.frames as f64),
+        av1_report.bytes.len(),
+        doc.rav1e_asm_enabled,
+        1000.0 / bridge_ms.max(1e-6),
+    );
+
+    if let Some(readme_path) = flag("--update-readme") {
+        let content = match try_read_file(&readme_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let start_marker = "<!-- BENCHMARK_TABLE_START -->";
+        let end_marker = "<!-- BENCHMARK_TABLE_END -->";
+        let (Some(s_idx), Some(e_idx)) = (content.find(start_marker), content.find(end_marker)) else {
+            eprintln!("README {readme_path} is missing {start_marker} .. {end_marker} markers");
+            return ExitCode::FAILURE;
+        };
+        if s_idx >= e_idx {
+            eprintln!("invalid benchmark marker order in {readme_path}");
+            return ExitCode::FAILURE;
+        }
+        let mut updated = String::with_capacity(content.len() + md_table.len() + 64);
+        updated.push_str(&content[..s_idx + start_marker.len()]);
+        updated.push('
+');
+        updated.push_str(&md_table);
+        updated.push('
+');
+        updated.push_str(&content[e_idx..]);
+        if let Err(e) = std::fs::write(&readme_path, updated) {
+            eprintln!("write {readme_path}: {e}");
+            return ExitCode::FAILURE;
+        }
+        eprintln!("updated benchmark table in {readme_path}");
+    }
+
+    if has_flag("--markdown") || flag("--update-readme").is_some() {
+        println!("{md_table}");
+    } else {
+        let json_out = serde_json::json!({
+            "platform": doc.platform,
+            "arch": std::env::consts::ARCH,
+            "renderer": doc.renderer,
+            "rav1e_asm_enabled": doc.rav1e_asm_enabled,
+            "scene_parse_inspect_ms": load_ms,
+            "cpu_raster_1280x720_ms": raster_ms,
+            "bt709_rgba_to_i420_ms": color_ms,
+            "h266_vvc_mp4_fps": vvc_fps,
+            "h266_vvc_mp4_bytes": vvc_report.bytes.len(),
+            "av1_mp4_fps": av1_fps,
+            "av1_mp4_bytes": av1_report.bytes.len(),
+            "session_agent_status_ms": bridge_ms,
+            "markdown": md_table,
+        });
+        println!("{}", serde_json::to_string_pretty(&json_out).unwrap());
+    }
+
+    ExitCode::SUCCESS
 }
 
 fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
