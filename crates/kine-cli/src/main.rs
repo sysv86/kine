@@ -42,6 +42,8 @@ USAGE:
   kine check      --scene <scene> [--against <golden.png>] [--frame N] [--threshold R]
   kine snapshot   --scene <scene.json> --against <golden.png> [--frame N] [--threshold R]
                   [--backend auto|gpu|cpu]
+  kine studio     [--scene <scene>] [--workspace <dir>] [--backend auto|gpu|cpu]
+                  [--headless-check]          launch the native Xilem Kine Studio GUI
   kine serve      [--listen 127.0.0.1:7700]
 "
 }
@@ -682,6 +684,61 @@ fn main() -> ExitCode {
                     eprintln!("snapshot error: {e}");
                     ExitCode::FAILURE
                 }
+            }
+        }
+
+        "studio" => {
+            let workspace = flag("--workspace")
+                .map(PathBuf::from)
+                .or_else(|| std::env::current_dir().ok());
+            let mut studio_state = kine_studio::StudioState::new(workspace);
+            studio_state.engine.set_backend(engine.backend());
+            let _ = studio_state.render_current_frame();
+
+            if let Some(scene_path) = flag("--scene") {
+                if let Err(e) = studio_state.load_scene_file(Path::new(&scene_path)) {
+                    eprintln!("studio load error ({scene_path}): {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+
+            if has_flag("--headless-check") {
+                let look = kine_studio::studio_look(&mut studio_state);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": look.ok,
+                        "stage": look.stage,
+                        "summary": look.summary,
+                        "width": studio_state.scene_def.width,
+                        "height": studio_state.scene_def.height,
+                        "duration": studio_state.duration,
+                        "tracks": studio_state.build_timeline_tracks().len(),
+                        "compositions": studio_state.compositions.len(),
+                    }))
+                    .unwrap()
+                );
+                return if look.ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                };
+            }
+
+            #[cfg(feature = "studio-ui")]
+            {
+                match kine_studio::run_studio(studio_state) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("studio error: {e}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            #[cfg(not(feature = "studio-ui"))]
+            {
+                eprintln!("kine built without `studio-ui` feature; use `--headless-check` or rebuild with default features.");
+                ExitCode::FAILURE
             }
         }
 

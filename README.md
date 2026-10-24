@@ -1,273 +1,73 @@
-# Kine
+# Kine — Video-as-Code Engine & Native Xilem Studio
 
-A Rust engine for programmatic synthesis and processing of video, graphics and
-audio on **Linux** and **macOS**. It takes a scene description in TypeScript or
-JSON, computes layout, shapes text, rasterizes frames (CPU or GPU), executes
-WGSL shaders, processes audio and packs the result into output containers.
+Kine is a deterministic, self-contained **Video-as-Code** engine and **native Rust Xilem Studio** (`kine-studio`) targeting **Linux**, **Windows**, and **macOS**.
 
-## Supported platforms & zero-bloat architecture
+## Supported Platforms
 
-Kine targets **Linux** (`x86_64`, `aarch64`) and **macOS** (`aarch64` Apple
-Silicon, `x86_64`).
+| Platform | Architectures | Portable Default Pipeline | Optional GPU / Hardware Video (`--features gpu,hwencode`) |
+| :--- | :--- | :--- | :--- |
+| **Linux** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 + Xilem (Wayland/X11) | Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 |
+| **Windows** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 + Xilem (Win32/DX12) | DirectX 12 / Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 |
+| **macOS** | `aarch64` (Apple Silicon), `x86_64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 + Xilem (AppKit/Metal) | Metal (`wgpu` + `vello_gpu`) + VideoToolbox H.264 |
 
-To keep macOS maintenance effortless even when developing and testing primarily
-on Linux:
+The default build uses a 100% deterministic software rendering and encoding pipeline (`taffy` layout, `cosmic-text` shaping, `vello_cpu` sparse-strip rasterization, `naga` CPU WGSL shader VM, `rav1e` AV1 software encoder, `symphonia`/`rubato`/`flacenc` audio DSP, and `muxfin`/`mkv` container muxing) so every test and render produces identical results on headless Linux servers, Windows workstations, and macOS laptops.
 
-1. **100% OS-agnostic core pipeline** — Layout (`taffy`), deterministic text
-   shaping (`cosmic-text` with an isolated font database), CPU rasterization
-   (`vello_cpu`), multithreaded CPU WGSL shader evaluation (`naga` AST VM),
-   software AV1 video encoding (`rav1e`), audio synthesis/DSP/mixing
-   (`symphonia`, `rubato`, `flacenc`, `hound`) and MP4/MKV/WebM muxing are pure
-   Rust with zero OS-specific branches. Any test passing on Linux exercises the
-   exact same code paths that run on macOS.
-2. **Unified `wgpu` / `gpu-video` abstraction** — When optional GPU features are
-   enabled, `wgpu` automatically selects **Vulkan** on Linux and **Metal** on
-   macOS, while `gpu-video` selects **Vulkan Video** on Linux and
-   **VideoToolbox** on macOS.
-3. **Injectable host facts (`kine-platform`)** — OS classification, backend
-   reporting, and output path resolution are driven by a pure `Facts` struct,
-   allowing Linux unit tests to deterministically verify both Linux and macOS
-   behavior without a physical Mac, backed by GitHub Actions CI (`ubuntu-latest`
-   and `macos-14`).
+## Kine Studio (`crates/kine-studio`)
 
-## Workspace layout
+`kine-studio` is a full-featured visual composition editor, NLE timeline, node/shader inspector, and AI agent studio inspired by **Hyperframes Studio**, written in pure Rust on **Xilem `0.4.0`** (Linebender's reactive UI architecture built on `masonry`, `vello`, `peniko`, `parley`, and `winit`).
 
-The Cargo workspace is split into 11 crates:
+### Key Studio Capabilities
 
-* `crates/kine-core` — scene graph (`Scene`, `Node`, `NodeKind`), Flexbox layout through `taffy`, keyframes, easing curves (`Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `CubicBezier`, `Steps`) and an analytical spring solver (`Spring`).
-* `crates/kine-text` — deterministic text shaping on `cosmic-text` (`harfrust`) with an isolated font database.
-* `crates/kine-shader` — parsing, validation and reflection of WGSL fragment shaders via `naga`, `std140` uniform packing by reflected offsets, built-in presets (`presets.rs`) and a multithreaded software WGSL interpreter for the CPU path (`vm.rs`).
-* `crates/kine-render` — scene rasterization through `vello_cpu` (CPU) and `vello_gpu` + `wgpu` (GPU: Vulkan on Linux, Metal on macOS), decoding and caching of input video (`video_io.rs`), export of raster and vector formats (`formats.rs`).
-* `crates/kine-encode` — RGBA ↔ YUV BT.709 limited-range conversion (`I420`, `NV12`, `I444`), a software AV1 encoder (`rav1e`), `YUV4MPEG2` (`.y4m`) stream I/O, raw streams (`.rgba`, `.yuv`, `.nv12`) and the indexed `.kvid` container.
-* `crates/kine-mux` — muxing video (`AV1`, `H.264`) and audio (`FLAC`) into `MP4` (`muxfin`), `Matroska` (`.mkv`) and `WebM` (`.webm`), plus hardware H.264 encoding (`hwencode.rs` via Vulkan Video on Linux and VideoToolbox on macOS).
-* `crates/kine-audio` — decoding (`WAV`, `AIFF`, `FLAC`, `MP3`, `OGG`), procedural synthesis (`synth.rs`), polyphase resampling (`rubato`), a parametric biquad equalizer, a dynamics compressor, automatic sidechain ducking (`dsp.rs`), mixing (`mix.rs`) and writing `WAV`, `AIFF`, `FLAC`.
-* `crates/kine-script` — TypeScript to JavaScript transpilation with `oxc`, execution in `QuickJS` (`rquickjs`), building a `Scene` from the declarative description and emitting the `kine.d.ts` declaration file.
-* `crates/kine-platform` — host environment detection (Linux, macOS), graphics/video backend reporting and file-write policy.
-* `crates/kine-server` — high-level engine API (`Engine`), the video pipeline (`video.rs`), the static scene analyzer (`inspect`), per-pixel comparison (`snapshot_diff`) and a JSON-RPC 2.0 TCP server (`rpc.rs`).
-* `crates/kine-cli` — the `kine` command-line interface.
+1. **Single-Process Engine Synchronization**:
+   - `StudioState` owns `kine_server::Engine`, `SceneHandle`, and the authored `kine_script::SceneDef` AST **in the same OS process**.
+   - Every edit in the Design Inspector, NLE Timeline, Code Editor, or AI Agent Chat mutates `SceneDef` inside a checkpointed undo/redo transaction, rebuilds `kine_core::Scene` in-memory, evaluates animations & layout at the current playhead timestamp, and converts `vello_cpu::Pixmap` directly into `xilem::masonry::peniko::ImageData` (`AlphaPremultiplied` RGBA8) with zero IPC or process duplication.
+2. **Hyperframes-Style 4-Zone Workspace**:
+   - **Header Bar**: Active composition switcher, live static inspection badge, `Backend` selector (`AUTO`/`CPU`/`GPU`), `Capture PNG` / `Capture SVG`, `Ask AI Agent` prompt builder, Dock visibility toggle, and one-click `Render Export`.
+   - **Left Dock**:
+     - `Compositions`: Built-in starter compositions + automatic discovery of `.ts` and `.json` scenes in `examples/`.
+     - `Assets`: Fonts (`JetBrains Mono`), procedural patterns (`pattern:checkerboard`), procedural video clips (`video:testbars`), synthesized DSP audio beds (`synth:...`), and WGSL shader assets.
+     - `Code (TS/JSON)`: Live editable scene source buffer with instant `Apply to Engine` compilation.
+     - `Catalog & FX`: One-click insertion of primitives (`Rect`, `Circle`, `Text`, `Path`, `Image`, `Video`, `Audio`) and WGSL post-processing shaders (`Film Grain`, `Vignette`, `Chromatic Aberration`, `CRT Scanlines`).
+   - **Center Viewport & Transport**:
+     - Live rasterized composition viewport with interactive selection bounding-box + corner handles overlay, action/title safe-area reticles, and zoom controls (`25%`–`400%`).
+     - Transport bar: `|<`, `< -1f`, `Play / Pause`, `+1f >`, `>|`, clickable timecode (`MM:SS.ms` vs `Frame F / Total`), interactive seek scrubber with snapping, playback rate (`0.5x`–`2.0x`), `Loop`, and `Mute`.
+   - **Bottom NLE Timeline & Nodes**:
+     - Timeline toolbar: `Undo` / `Redo` with history depth, `Prev KF` / `+Keyframe (K)` / `Next KF`, `Split @ Playhead`, `Duplicate`, `Delete`, `Snap (N)`, `Auto-KF`, and `Ripple` edit mode.
+     - Adaptive time ruler (`generate_ruler_ticks`) and multi-track lanes for hierarchical scene nodes, animated property sub-tracks with `◆` keyframe markers, and DSP audio tracks.
+   - **Right Dock**:
+     - `Design` Inspector: Computed bounding box (`X`, `Y`, `W`, `H`), canvas alignment buttons, position/size nudges, opacity slider, rotation & scale steppers, hex color & swatch picker, corner radius, typography controls, and animation track easing curves (`linear`, `easeOut`, `easeOutCubic`, `spring`).
+     - `Layers` Tree: Hierarchical Z-ordered scene graph with visibility toggles (`👁`/`🚫`) and sibling Z-order reordering (`↑`/`↓`).
+     - `AI Agent` Chat & WebMCP Tool Loop: Interactive chat panel + **"Kine Studio element edit request v1"** prompt generator (`build_element_agent_prompt`) backed by 12 verified in-process `studio_*` tools:
+       - `studio_look`, `studio_select`, `studio_seek`, `studio_frame`, `studio_inspect`
+       - `studio_set_text`, `studio_set_style`, `studio_transform` (with read-back bounding-box verification)
+       - `studio_add_animation`, `studio_update_animation`, `studio_add_keyframe`, `studio_delete_animation`
+     - `Renders` Queue: In-process multi-format export (`MP4`, `MKV`, `WebM`, `GIF`, `PNG`, `SVG`) with frame count, byte size, and output path history.
 
-## Build features
+### Launching Kine Studio
 
-The CLI builds CPU-only by default. GPU rasterization, hardware encoding and the
-GPU-to-encoder zero-copy path are feature-gated:
+```bash
+# Launch via the kine CLI
+cargo run -p kine-cli -- studio
+cargo run -p kine-cli -- studio --scene examples/showcase.ts
 
-```sh
-cargo build --release -p kine-cli                      # CPU rasterizer + software AV1 (Linux & macOS)
-cargo build --release -p kine-cli --features gpu       # vello_gpu / wgpu (Vulkan on Linux, Metal on macOS)
-cargo build --release -p kine-cli --features hwencode  # Hardware H.264 encoder (Vulkan Video / VideoToolbox)
-cargo build --release -p kine-cli --features zero-copy # GPU texture handed to the hardware encoder
-                                                       # without a host round trip
+# Or launch the standalone kine-studio binary directly
+cargo run -p kine-studio -- --scene examples/showcase.ts
+
+# Run a headless verification check (for CI or automated agents)
+cargo run -p kine-cli -- studio --headless-check
 ```
 
-## Video, image and audio input and output
+## Workspace Architecture
 
-### Video output formats
-* `.mp4` — ISO-BMFF container (video `AV1` or hardware `H.264`, audio `FLAC`).
-* `.mkv` — Matroska EBML v4 container (video `V_AV1` or `V_MPEG4/ISO/AVC`, audio `A_FLAC`).
-* `.webm` — WebM EBML v4 container (video `V_AV1`, audio `A_FLAC`).
-* `.y4m` — uncompressed `YUV4MPEG2` stream (`C420mpeg2`, BT.709 limited range).
-* `.gif` — animated `GIF89a` with 4×4 Bayer dithering and LZW compression.
-* `.kvid` — Kine indexed lossless container (RGBA8 frames compressed with QOI plus an offset table for `O(1)` random access that preserves the alpha channel).
-* `.rgba`, `.yuv` (`.i420`), `.nv12` — raw headerless video streams.
-* A frame directory (`--seq`, or a path ending in `/`) — writes a `frame_0000.<ext>` sequence in any single-frame format.
-* `stdout` (`--out - --format <fmt>`) — streams container or raw bytes to standard output.
-
-### Video input formats (the `video()` node and `kine transcode`)
-* `.y4m` — `YUV4MPEG2` streams (`4:2:0`, `4:2:2`, `4:4:4`, `mono`).
-* `.kvid` — indexed Kine lossless files with alpha support.
-* `.gif` — animated `GIF87a` / `GIF89a` files (LZW decoder with variable code width, local palettes, transparency and frame-disposal handling).
-* Image directories (`path/to/frames/` or `seq:path/to/frames`) — a name-sorted sequence of `.png`, `.qoi`, `.bmp`, `.ppm`, `.pam`, `.tga` files.
-* Procedural sources `video:<kind>[:WxH[:fps[:seconds]]]`:
-  * `video:smpte:160x90:30:2.0` — SMPTE test pattern with a moving marker.
-  * `video:plasma:160x90:30:2.0` — animated colour field.
-  * `video:grid:160x90:30:2.0` — moving coordinate grid.
-* External compressed containers (`.mp4`, `.mkv`, `.webm`, `.mov`) — decoded through an `ffmpeg -> YUV4MPEG2` pipe when `ffmpeg` is available on the system.
-
-### Single-frame and graphics formats
-* Read and write: `.png` (RGBA8), `.qoi` (Quite OK Image v1.0), `.bmp` (BGRA32 / BGR24), `.ppm` (Netpbm `P6`), `.pam` (Netpbm `P7` `RGB_ALPHA`), `.tga` (Truevision TGA).
-* Export only: `.svg` (standalone SVG 1.1 vector document built from the computed scene tree).
-
-### Audio formats
-* Input: `.wav` (16/24-bit PCM, 32-bit float), `.aiff` (16/24-bit big-endian PCM), `.flac`, `.mp3`, `.ogg` and procedural URIs `synth:<shape>:<hz>:<seconds>` (`sine`, `square`, `saw`, `triangle`, `white-noise`, `pink-noise`, `chord:...`, `sweep:...`).
-* Output: `.wav` (`16`, `24`, `32f`), `.aiff` (`16`, `24`), `.flac` (`16`, `24`).
-
-## Scene description (TypeScript DSL)
-
-A scene script returns a `scene(width, height, root, options)` call:
-
-```ts
-const W = 1280;
-const H = 720;
-
-return scene(
-  W,
-  H,
-  container({ size: { width: W, height: H }, justifyContent: "center", alignItems: "center" }, [
-    rect({
-      gradient: linearGradient(135, [
-        { offset: 0.0, color: "#0b1020" },
-        { offset: 1.0, color: "#1b2440" },
-      ]),
-      position: "absolute",
-      inset: { top: 0, left: 0, right: 0, bottom: 0 },
-    }),
-
-    video("clip.kvid", {
-      objectFit: "cover",
-      cornerRadius: 12,
-      start: 0.0,
-      trimStart: 0.2,
-      playbackRate: 1.0,
-      loop: true,
-      size: { width: 480, height: 270 },
-    }),
-
-    text("Kine", {
-      fontFamily: "JetBrains Mono",
-      fontSize: 64,
-      fontWeight: 700,
-      color: "#f0f4ff",
-      align: "center",
-      animate: {
-        offsetY: { from: 40, to: 0, start: 0.0, end: 0.8, easing: spring(180, 22) },
-      },
-    }),
-
-    presets.vignette({ intensity: 0.35, smoothness: 1.6 }, {
-      position: "absolute",
-      inset: { top: 0, left: 0, right: 0, bottom: 0 },
-      size: { width: W, height: H },
-    }),
-  ]),
-  {
-    audio: {
-      sampleRate: 48000,
-      channels: 2,
-      normalizePeakDb: -1.0,
-      tracks: [
-        { src: "voice.wav", gainDb: -2, start: 0.2, highpassHz: 80 },
-        { src: "music.flac", gainDb: -10, loop: true, duckDb: -9, pan: -0.1 },
-      ],
-    },
-  }
-);
-```
-
-### Scene graph nodes
-* `container(opts, children)` — grouping and Flexbox layout node.
-* `rect(opts)` — rectangle with rounded corners (`cornerRadius`), fill (`fill` or `gradient`), stroke (`strokeColor`, `strokeWidth`) and shadow (`shadowColor`, `shadowBlur`, `shadowOffsetX`, `shadowOffsetY`).
-* `circle(opts)` — circle or ellipse (`fill`, `radius`, `gradient`, `stroke*`, `shadow*`).
-* `path(d, opts)` — vector outline in SVG path syntax (`M`, `L`, `H`, `V`, `C`, `Q`, `Z`).
-* `image(src, opts)` — raster image (`objectFit`: `"cover" | "contain" | "fill"`, `cornerRadius`).
-* `video(src, opts)` — input video stream (`start`, `trimStart`, `trimEnd`, `playbackRate`, `loop`, `objectFit`, `cornerRadius`).
-* `text(content, opts)` — text block (`fontFamily`, `fontSize`, `fontWeight`, `color`, `align`).
-* `shader(wgsl, opts)` — WGSL fragment shader layer (`blend`: `"normal" | "add" | "multiply" | "screen"`, `uniforms`).
-
-### WGSL fragment shader contract
-The engine injects the vertex stage and a fixed binding prelude:
-* `@group(0) @binding(0) var<uniform> kine_frame: KineFrame` — fields `resolution: vec2<f32>`, `time: f32`, `frame: f32`.
-* `@group(0) @binding(1) var kine_input: texture_2d<f32>` — the frame rendered so far.
-* `@group(0) @binding(2) var kine_sampler: sampler` — linear sampler.
-* `@group(1) @binding(0) var<uniform> <name>: <Type>` — the user parameter buffer, filled from the node's `uniforms` field.
-
-Shader layers run in scene order; `add`, `multiply` and `screen` blend the layer
-over the accumulated frame, which is what the multi-pass glow chains in
-`examples/ascii_crt/scene.ts` rely on.
-
-## Command-line interface (`kine`)
-
-```sh
-# Build
-cargo build --release -p kine-cli
-
-# Render video into the various containers and streams
-kine render --scene examples/scored/scene.ts --out out.mp4 --frames 60 --fps 30
-kine render --scene examples/scored/scene.ts --out out.mkv --frames 60 --fps 30
-kine render --scene examples/scored/scene.ts --out out.webm --frames 60 --fps 30
-kine render --scene examples/scored/scene.ts --out out.y4m --frames 60 --fps 30
-kine render --scene examples/scored/scene.ts --out out.gif --frames 30 --fps 15
-kine render --scene examples/scored/scene.ts --out out.kvid --frames 60 --fps 30
-
-# GPU rasterizer into the hardware H.264 encoder, no host readback
-kine render --scene examples/ascii_crt/scene.ts --out ascii.mp4 --frames 300 --fps 30 \
-            --backend gpu --encoder h264-zero-copy
-
-# Write a frame sequence into a directory
-kine render --scene examples/motion/scene.ts --out frames_dir/ --format qoi --frames 30 --fps 30
-
-# Stream Y4M to standard output
-kine render --scene examples/motion/scene.ts --out - --format y4m --frames 30 --fps 30 > stream.y4m
-
-# Render a single frame (PNG, QOI, BMP, PPM, PAM, TGA, SVG)
-kine render --scene examples/hello/scene.ts --out frame.png --frame 0
-kine render --scene examples/hello/scene.ts --out frame.svg --frame 0
-
-# Inspect input video and transcode between formats
-kine video-info --in out.kvid
-kine transcode  --in out.kvid --out transcoded.mp4 --fps 30
-
-# Synthesize test signals and mix a scene's audio bed
-kine tone      --out tone.wav --wave sine --hz 440 --seconds 2 --bits 24
-kine audio-mix --scene examples/scored/scene.ts --out mix.flac --seconds 3
-
-# Emit TypeScript declarations (.d.ts)
-kine types --out kine.d.ts
-
-# Static checks on scene, shaders and audio, plus comparison against a golden file
-kine shader   --file examples/shaders/grain.wgsl
-kine inspect  --scene examples/scored/scene.ts
-kine check    --scene examples/scored/scene.ts
-kine snapshot --scene examples/hello/scene.ts --against golden.png --frame 0
-
-# Contact sheet (strip) and frame overlay (onion)
-kine strip --scene examples/motion/scene.ts --out strip.png --frames 6 --fps 30
-kine onion --scene examples/motion/scene.ts --out onion.png --frames 6 --fps 30
-
-# Environment diagnostics and the JSON-RPC server
-kine doctor
-kine host
-kine serve --listen 127.0.0.1:7700
-```
-
-## Examples
-
-* `examples/hello` — minimal scene, single frame.
-* `examples/motion` — keyframed animation and video output.
-* `examples/scored` — video input, graphics layers and a mixed audio bed.
-* `examples/shaders` — a custom WGSL effect layer on top of the scene.
-* `examples/ascii_crt` — six-pass GPU demo: raymarched 3D, ASCII quantization, three additive glow passes and a curved CRT finish.
-
-## JSON-RPC 2.0 methods (`kine serve`)
-
-The server accepts newline-delimited (`\n`) JSON-RPC 2.0 messages:
-
-* `ping` — connection check.
-* `doctor` — renderer, fonts, formats and platform details.
-* `types` — contents of `kine.d.ts`.
-* `set_backend` — pick the rasterization backend (`"auto"`, `"gpu"`, `"cpu"`).
-* `load_scene` — load a scene from JSON or TypeScript, returns a `scene` handle.
-* `free_scene` — drop a scene from memory.
-* `render_frame` — render one frame by `frame` number or `time` (returns base64).
-* `render_video` — render a clip into the chosen container (`mp4`, `mkv`, `webm`, `y4m`, `gif`, `kvid`, `rgba`, `i420`, `nv12`).
-* `video_info` — metadata of an input video source (`width`, `height`, `fps_num`, `fps_den`, `frames`, `duration_seconds`).
-* `render_strip` / `render_onion` — contact sheet or frame overlay.
-* `audio_metrics` — peak (`peak_db`), `rms_db` and `lufs_approx` of the scene audio bed.
-* `inspect` — static check of the scene tree, fonts, shaders and video inputs without rasterizing.
-* `snapshot` — per-pixel comparison against a golden PNG.
-* `timeline` — summary of nodes, animations, video inputs and audio tracks in the scene.
-
-## Testing & CI/CD
-
-```sh
-cargo test --workspace                     # default features (Linux & macOS)
-cargo test --workspace --all-features      # adds the GPU and hardware-encoder paths
-bash scripts/ci-smoke.sh                   # end-to-end CLI smoke test
-```
-
-GitHub Actions (`.github/workflows/ci.yml`) runs formatting, `clippy`, unit and
-integration tests, and `scripts/ci-smoke.sh` on both `ubuntu-latest` (Linux
-`x86_64`) and `macos-14` (macOS Apple Silicon `aarch64`).
-
-## License
-
-MIT. The bundled font is JetBrains Mono (SIL Open Font License 1.1).
+- `crates/kine-core` — Scene graph (`Scene`, `Node`, `NodeKind`), `taffy` layout integration, and keyframe animation curves (`Linear`, `EaseIn`, `EaseOut`, `EaseInOut`, `CubicBezier`, `Steps`, analytical `Spring`).
+- `crates/kine-text` — Pure-Rust font loading and text shaping (`cosmic-text`).
+- `crates/kine-shader` — WGSL shader validation (`naga`), uniform reflection, and deterministic multi-threaded CPU WGSL fragment VM.
+- `crates/kine-render` — Unified CPU (`vello_cpu`) and optional GPU (`vello_gpu` + `wgpu`) frame renderer, procedural/container video input cache, and multi-format still/vector export (`PNG`, `QOI`, `BMP`, `PPM`, `PAM`, `TGA`, `GIF89a`, `SVG`).
+- `crates/kine-encode` — Software AV1 (`rav1e`), `YUV4MPEG2` (`.y4m`), raw `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
+- `crates/kine-audio` — Waveform synthesis, file decoding (`symphonia`), resampling (`rubato`), biquad EQ, dynamic range compression, sidechain ducking, and `WAV`/`FLAC`/`AIFF` output.
+- `crates/kine-mux` — ISO-BMFF `.mp4` (`muxfin`) and Matroska `.mkv` / `.webm` muxers, plus optional hardware H.264 encoding (`gpu-video`).
+- `crates/kine-script` — TypeScript stripping (`oxc`), embedded QuickJS (`rquickjs`) evaluation, and JSON/TS scene authoring schema (`SceneDef`, `NodeDef`).
+- `crates/kine-platform` — Host OS detection (`Linux`, `Windows`, `macOS`) and output path resolution (`KINE_OUTPUT_DIR`).
+- `crates/kine-server` — In-process `Engine` API, static scene inspector, snapshot pixel-diff gate, and newline-delimited JSON-RPC TCP server.
+- `crates/kine-studio` — Native Rust **Xilem** GUI studio (`StudioState`, NLE timeline, node/shader inspector, and `studio_*` AI agent tools) living in-process with `kine-server::Engine`.
+- `crates/kine-cli` — Non-interactive `kine` command-line binary (plus `kine studio` launcher).

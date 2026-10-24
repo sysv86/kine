@@ -17,14 +17,17 @@ kine-script.workspace = true
 kine-shader.workspace = true
 kine-audio.workspace = true
 kine-server.workspace = true
+kine-studio.workspace = true
 serde_json.workspace = true
 taffy.workspace = true
 
 [features]
-default = []
+default = ["studio-ui"]
+# Native Xilem desktop UI for `kine studio`.
+studio-ui = ["kine-studio/xilem-ui"]
 # Hardware H.264 encode (Vulkan Video) in addition to the software AV1 path.
-hwencode = ["kine-server/hwencode"]
-gpu = ["kine-server/gpu"]
+hwencode = ["kine-server/hwencode", "kine-studio/hwencode"]
+gpu = ["kine-server/gpu", "kine-studio/gpu"]
 # The closed loop: GPU-rasterized texture handed to the hardware encoder with no
 # readback (needs both `gpu` and `hwencode`).
-zero-copy = ["kine-server/zero-copy"]
+zero-copy = ["kine-server/zero-copy", "kine-studio/zero-copy"]
