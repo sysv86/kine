@@ -3,6 +3,7 @@
 //! the Kine engine across **Linux**, **Windows**, and **macOS**.
 
 pub mod agent_tools;
+pub mod bridge;
 pub mod catalog;
 #[cfg(feature = "xilem-ui")]
 pub mod custom_widgets;
@@ -20,10 +21,19 @@ pub mod timeline;
 pub mod ui;
 
 pub use agent_tools::{
-    agent_tools_json_schema, build_element_agent_prompt, dispatch_agent_tool, studio_add_animation,
-    studio_add_keyframe, studio_delete_animation, studio_frame, studio_inspect, studio_look,
-    studio_seek, studio_select, studio_set_style, studio_set_text, studio_transform,
+    agent_tools_json_schema, build_element_agent_prompt, dispatch_agent_tool,
+    studio_add_animation, studio_add_keyframe, studio_add_node, studio_align_node,
+    studio_audio, studio_delete_animation, studio_delete_keyframe, studio_delete_node,
+    studio_duplicate_node, studio_frame, studio_inspect, studio_look, studio_reorder_node,
+    studio_seek, studio_select, studio_selection, studio_set_shader, studio_set_style,
+    studio_set_text, studio_shift_time, studio_split, studio_status, studio_timeline,
+    studio_toggle_visibility, studio_transform, studio_transport, studio_tree,
     studio_update_animation, AgentToolResult, TransformPatch,
+};
+pub use bridge::{
+    bridge_call, bridge_watch, discover_bridge_addr, BridgeDiscoveryManifest, BridgeEvent,
+    SceneFileWatcher, StudioBridgeServer, BRIDGE_MANIFEST_FILENAME, DEFAULT_BRIDGE_HOST,
+    DEFAULT_BRIDGE_PORT,
 };
 pub use catalog::{
     build_catalog_node, default_assets, default_compositions, starter_kinetic_scene,
@@ -234,6 +244,64 @@ mod tests {
         let prompt = build_element_agent_prompt(&state, NodeId(2), "Add a subtle cyan glow");
         assert!(prompt.contains("Kine Studio element edit request v1"));
         assert!(prompt.contains("Add a subtle cyan glow"));
+    }
+
+    #[test]
+    fn live_tcp_bridge_and_file_watcher_synchronize_external_cli_agent_edits() {
+        let root = std::env::temp_dir().join(format!("kine-studio-bridge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let mut state = StudioState::new(Some(root.clone()));
+        let addr = state.start_bridge_server(Some("127.0.0.1:0")).unwrap();
+
+        // Spawn a background client thread that talks to Studio over TCP while the main thread polls
+        let addr_client = addr.clone();
+        let client_handle = std::thread::spawn(move || {
+            let status = bridge_call(&addr_client, "studio_status", json!({})).unwrap();
+            assert!(status.ok);
+
+            let set_txt = bridge_call(
+                &addr_client,
+                "studio_set_text",
+                json!({ "nodeId": 4, "text": "EXTERNAL CLI AGENT" }),
+            )
+            .unwrap();
+            assert!(set_txt.ok);
+
+            let add_rect = bridge_call(
+                &addr_client,
+                "studio_add_node",
+                json!({
+                    "kind": "rect",
+                    "x": 120.0,
+                    "y": 80.0,
+                    "width": 200.0,
+                    "height": 90.0,
+                    "fill": "#00e3ff"
+                }),
+            )
+            .unwrap();
+            assert!(add_rect.ok);
+        });
+
+        // Poll bridge on main studio state until client finishes
+        for _ in 0..50 {
+            state.poll_bridge_and_watcher();
+            if client_handle.is_finished() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        client_handle.join().unwrap();
+
+        assert_eq!(
+            state.node_def(NodeId(4)).and_then(|d| d.content.as_deref()),
+            Some("EXTERNAL CLI AGENT")
+        );
+        assert_eq!(state.node_paths().len(), 8);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -54,7 +54,10 @@ fn transparent() -> Color {
 }
 
 /// Launch the native Xilem desktop window for Kine Studio.
-pub fn run_studio(state: StudioState) -> Result<(), EventLoopError> {
+pub fn run_studio(mut state: StudioState) -> Result<(), EventLoopError> {
+    if state.bridge.is_none() {
+        let _ = state.start_bridge_server(None);
+    }
     let app = Xilem::new_simple(
         state,
         app_logic,
@@ -142,18 +145,35 @@ pub fn app_logic(state: &mut StudioState) -> impl WidgetView<StudioState> + use<
     };
 
     let run_ticker = state.needs_animation_tick();
+    let bridge_pending = state.bridge.as_ref().map(|b| b.pending_flag());
+    let has_watched_file = state.watched_scene_path().is_some();
+    let run_loop = run_ticker || bridge_pending.is_some() || has_watched_file;
 
-    // 60 Hz frame-rate-independent ticker active during playback or UI animations.
+    // 60 Hz frame-rate-independent ticker during playback/animations, plus low-latency
+    // wakeups for external CLI bridge commands and live scene file hot-reloads.
     fork(
         root_view,
-        run_ticker.then(|| {
+        run_loop.then(|| {
             task(
-                |proxy| async move {
-                    let mut tick = xilem::tokio::time::interval(Duration::from_millis(16));
-                    loop {
-                        tick.tick().await;
-                        if proxy.message(()).is_err() {
-                            break;
+                move |proxy| {
+                    let pending_flag = bridge_pending.clone();
+                    async move {
+                        let interval_ms = if run_ticker { 16 } else { 32 };
+                        let mut tick =
+                            xilem::tokio::time::interval(Duration::from_millis(interval_ms));
+                        let mut idle_counter = 0u32;
+                        loop {
+                            tick.tick().await;
+                            idle_counter = idle_counter.wrapping_add(1);
+                            let has_cmd = pending_flag
+                                .as_ref()
+                                .is_some_and(|f| f.load(std::sync::atomic::Ordering::Acquire));
+                            let should_wake = run_ticker
+                                || has_cmd
+                                || (has_watched_file && idle_counter % 6 == 0);
+                            if should_wake && proxy.message(()).is_err() {
+                                break;
+                            }
                         }
                     }
                 },
@@ -622,6 +642,37 @@ fn header_bar(
                 st.cycle_theme_mode();
             })
             .into_any_flex(),
+            // Real-time CLI Bridge Toggle (`CLI :7701`)
+            if let Some(addr) = state.bridge_listen_addr() {
+                let port_lbl = addr
+                    .rsplit(':')
+                    .next()
+                    .map(|p| format!("CLI :{p}"))
+                    .unwrap_or_else(|| "CLI LIVE".to_string());
+                button(
+                    flex_row((
+                        icon("terminal", 13.0, t.accent),
+                        mono(port_lbl, 9.0, t.accent_ink),
+                    ))
+                    .gap(4.0_f64.px())
+                    .cross_axis_alignment(CrossAxisAlignment::Center),
+                    |st: &mut StudioState| {
+                        st.toggle_bridge_server();
+                    },
+                )
+                .padding(Padding::from_vh(3.0, 7.0))
+                .corner_radius(5.0)
+                .background_color(t.accent_wash)
+                .active_background_color(t.press)
+                .border(t.border_accent, 1.0)
+                .hovered_border_color(t.accent)
+                .into_any_flex()
+            } else {
+                icon_text_btn("terminal", "CLI Off", t, |st: &mut StudioState| {
+                    st.toggle_bridge_server();
+                })
+                .into_any_flex()
+            },
             // Settings Window Toggle (`⚙ Settings`)
             if state.settings_open {
                 icon_btn_on("tune", t, |st: &mut StudioState| {
@@ -680,6 +731,16 @@ fn status_bar(state: &StudioState, t: &StudioPalette) -> impl WidgetView<StudioS
             divider(&t).into_any_flex(),
             txt(banner, 9.5, t.text_soft).into_any_flex(),
             FlexSpacer::Flex(1.0).into_any_flex(),
+            mono(
+                match &state.bridge {
+                    Some(b) => format!("BRIDGE {} ({} cmds)", b.addr(), b.commands_handled),
+                    None => "BRIDGE OFF".to_string(),
+                },
+                8.5,
+                if state.bridge.is_some() { t.accent_ink } else { t.muted },
+            )
+            .into_any_flex(),
+            divider(&t).into_any_flex(),
             mono(format!("Undo:{undo_depth} Redo:{redo_depth}"), 8.5, t.muted).into_any_flex(),
             divider(&t).into_any_flex(),
             mono(

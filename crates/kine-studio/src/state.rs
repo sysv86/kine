@@ -2,6 +2,7 @@
 //! `kine_script::SceneDef`, undo/redo history, transport clock, settings,
 //! UI animations, and render jobs inside a single process without IPC.
 
+use crate::bridge::{SceneFileWatcher, StudioBridgeServer};
 use crate::catalog::{
     build_catalog_node, default_assets, default_compositions, starter_kinetic_scene, AssetEntry,
     AssetKind, CompositionEntry,
@@ -183,6 +184,10 @@ pub struct StudioState {
     pub last_render_ms: f32,
     pub inspect_findings: Vec<Finding>,
 
+    // ── External CLI Agent Bridge & Live File Watcher ──────────────────────
+    pub bridge: Option<StudioBridgeServer>,
+    pub file_watcher: SceneFileWatcher,
+
     // ── Render Queue ───────────────────────────────────────────────────────
     pub export_format: String,
     pub export_output_path: String,
@@ -290,6 +295,8 @@ impl StudioState {
             frame_revision: 0,
             last_render_ms: 0.0,
             inspect_findings: Vec::new(),
+            bridge: None,
+            file_watcher: SceneFileWatcher::default(),
             export_format: "mp4".to_string(),
             export_output_path: "studio-render.mp4".to_string(),
             render_queue: Vec::new(),
@@ -418,8 +425,9 @@ impl StudioState {
             || self.anim.toast_timer > 0.01
     }
 
-    /// Step both playback and UI transition animations by `dt_real_seconds`.
+    /// Step playback, UI transition animations, external CLI bridge commands, and live file watcher.
     pub fn tick_studio(&mut self, dt_real_seconds: f64) {
+        let _ = self.poll_bridge_and_watcher();
         if self.is_playing {
             self.tick_playback(dt_real_seconds);
         }
@@ -696,6 +704,7 @@ impl StudioState {
         self.anim.smooth_playhead = 0.0;
         self.selected_node = Some(NodeId(0));
         self.sync_scene_to_engine()?;
+        self.file_watcher.watch(Some(path.to_path_buf()), Some(&base));
         self.notify_status(format!("Loaded scene {}", path.display()));
         Ok(())
     }
@@ -725,6 +734,8 @@ impl StudioState {
         self.anim.smooth_playhead = 0.0;
         self.selected_node = Some(NodeId(0));
         self.sync_scene_to_engine()?;
+        let base = self.module_base();
+        self.file_watcher.watch(entry.source_path.clone(), Some(&base));
         self.notify_status(format!("Switched to composition: {}", entry.title));
         Ok(())
     }
