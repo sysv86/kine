@@ -754,13 +754,13 @@ fn main() -> ExitCode {
             if has_flag("--selection") || has_flag("--context") {
                 let addr = flag("--bridge")
                     .or_else(|| flag("--addr"))
-                    .unwrap_or_else(|| kine_studio::discover_bridge_addr(workspace.as_deref()));
+                    .unwrap_or_else(|| kine_session::discover_bridge_addr(workspace.as_deref()));
                 let tool = if has_flag("--selection") {
                     "studio_selection"
                 } else {
                     "studio_status"
                 };
-                match kine_studio::bridge_call(&addr, tool, serde_json::json!({})) {
+                match kine_session::bridge_call(&addr, tool, serde_json::json!({})) {
                     Ok(res) => {
                         println!("{}", serde_json::to_string_pretty(&res).unwrap());
                         return if res.ok {
@@ -776,7 +776,7 @@ fn main() -> ExitCode {
                 }
             }
 
-            let mut studio_state = kine_studio::StudioState::new(workspace);
+            let mut studio_state = kine_session::StudioState::new(workspace);
             studio_state.engine.set_backend(engine.backend());
             let _ = studio_state.render_current_frame();
 
@@ -795,7 +795,7 @@ fn main() -> ExitCode {
             }
 
             if has_flag("--headless-check") {
-                let look = kine_studio::studio_look(&mut studio_state);
+                let look = kine_session::studio_look(&mut studio_state);
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
@@ -837,7 +837,7 @@ fn main() -> ExitCode {
             }
             #[cfg(not(feature = "studio-ui"))]
             {
-                eprintln!("kine built without `studio-ui` feature; use `--headless-check` or rebuild with default features.");
+                eprintln!("kine built without `studio-ui` feature; use `--headless-check` or rebuild with `--features studio-ui`.");
                 ExitCode::FAILURE
             }
         }
@@ -1020,19 +1020,19 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
         .or_else(|| std::env::current_dir().ok());
     let addr = flag("--addr")
         .or_else(|| flag("--bridge"))
-        .unwrap_or_else(|| kine_studio::discover_bridge_addr(workspace.as_deref()));
+        .unwrap_or_else(|| kine_session::discover_bridge_addr(workspace.as_deref()));
 
     if subcmd == "schema" || subcmd == "tools" {
         println!(
             "{}",
-            serde_json::to_string_pretty(&kine_studio::agent_tools_json_schema()).unwrap()
+            serde_json::to_string_pretty(&kine_session::agent_tools_json_schema()).unwrap()
         );
         return ExitCode::SUCCESS;
     }
 
     if subcmd == "watch" || subcmd == "subscribe" {
         eprintln!("watching live Kine Studio events on {addr} (Ctrl-C to stop)...");
-        match kine_studio::bridge_watch(&addr, |ev| {
+        match kine_session::bridge_watch(&addr, |ev| {
             println!("{}", serde_json::to_string(&ev).unwrap_or_default());
             true
         }) {
@@ -1544,13 +1544,13 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
     // Offline / headless direct scene mode when `--scene` is supplied (except for `agent load --scene`)
     if subcmd != "load" {
         if let Some(scene_path) = flag("--scene") {
-            let mut state = kine_studio::StudioState::new(workspace);
+            let mut state = kine_session::StudioState::new(workspace);
             state.engine.set_backend(backend);
             if let Err(e) = state.load_scene_file(Path::new(&scene_path)) {
                 eprintln!("agent load error ({scene_path}): {e}");
                 return ExitCode::FAILURE;
             }
-            let res = kine_studio::dispatch_agent_tool(&mut state, &tool_name, &args_val);
+            let res = kine_session::dispatch_agent_tool(&mut state, &tool_name, &args_val);
             if res.ok && (has_flag("--save") || flag("--save-out").is_some()) {
                 let save_target = flag("--save-out").unwrap_or(scene_path);
                 if let Err(e) = state.save_scene_def_to_disk(Some(Path::new(&save_target))) {
@@ -1578,7 +1578,7 @@ fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {
     }
 
     // Live TCP Bridge mode against a running Kine Studio window
-    match kine_studio::bridge_call(&addr, &tool_name, args_val) {
+    match kine_session::bridge_call(&addr, &tool_name, args_val) {
         Ok(res) => {
             if subcmd == "selection" && has_flag("--prompt") {
                 if let Some(p) = res
