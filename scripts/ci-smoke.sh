@@ -25,11 +25,14 @@ echo "==> [4/7] Generating starter scene and inspecting"
 "$KINE_BIN" new --out "$OUT_DIR/starter.json"
 "$KINE_BIN" inspect --scene "$OUT_DIR/starter.json"
 
-echo "==> [5/7] Rendering still frame (PNG) and vector (SVG)"
+echo "==> [5/7] Rendering still frame (PNG) and a project module scene"
 "$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/frame0.png" --frame 0
-"$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/frame0.svg" --frame 0
 test -s "$OUT_DIR/frame0.png"
-test -s "$OUT_DIR/frame0.svg"
+"$KINE_BIN" modules --dir examples/modules > "$OUT_DIR/modules.json"
+test -s "$OUT_DIR/modules.json"
+grep -q '"name": "lower-third"' "$OUT_DIR/modules.json"
+"$KINE_BIN" render --scene examples/modules/scene.ts --out "$OUT_DIR/module.png" --frame 0
+test -s "$OUT_DIR/module.png"
 
 echo "==> [6/7] Rendering short MP4 animation"
 "$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/clip.mp4" --frames 6 --fps 30
