@@ -537,12 +537,15 @@ impl StudioState {
                 bridge.commands_handled += 1;
                 bridge.last_command_summary = Some(format!("{}: {}", result.tool, result.summary));
 
-                let event_kind = if event_revision != prev_rev {
+                // A seek re-renders the frame, so it also bumps frame_revision.
+                // Classify the playhead first; otherwise every seek is reported
+                // as a scene mutation.
+                let event_kind = if (event_time - prev_time).abs() > 1e-6 {
+                    "playhead_changed"
+                } else if event_revision != prev_rev {
                     "scene_mutated"
                 } else if event_selected != prev_sel.map(|n| n.0) {
                     "selection_changed"
-                } else if (event_time - prev_time).abs() > 1e-6 {
-                    "playhead_changed"
                 } else {
                     "tool_executed"
                 };
@@ -743,7 +746,10 @@ pub fn bridge_call(addr: &str, tool: &str, args: Value) -> Result<AgentToolResul
         serde_json::from_str(resp_line.trim()).map_err(|e| format!("bridge JSON error: {e}"))?;
 
     if let Some(err_obj) = v.get("error") {
-        let code = err_obj.get("code").and_then(Value::as_i64).unwrap_or(-32000);
+        let code = err_obj
+            .get("code")
+            .and_then(Value::as_i64)
+            .unwrap_or(-32000);
         let msg = err_obj
             .get("message")
             .and_then(Value::as_str)
@@ -801,11 +807,8 @@ mod tests {
     use std::thread;
 
     fn temp_workspace(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "kine_bridge_test_{}_{}",
-            tag,
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("kine_bridge_test_{}_{}", tag, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp workspace");
         dir
@@ -979,7 +982,9 @@ mod tests {
             .expect("event 3 (playhead_changed)");
         assert_eq!(ev3["event"], "playhead_changed");
 
-        watcher_handle.join().expect("watcher thread exited cleanly");
+        watcher_handle
+            .join()
+            .expect("watcher thread exited cleanly");
         state.stop_bridge_server();
         let _ = fs::remove_dir_all(&ws);
     }
@@ -1000,7 +1005,11 @@ mod tests {
         let mut modified = state.scene_def.clone();
         modified.width = 1920;
         modified.height = 1080;
-        fs::write(&scene_path, serde_json::to_string_pretty(&modified).unwrap()).unwrap();
+        fs::write(
+            &scene_path,
+            serde_json::to_string_pretty(&modified).unwrap(),
+        )
+        .unwrap();
 
         let changed = state.file_watcher.check_changed(Some(&ws), true);
         assert_eq!(changed.as_deref(), Some(scene_path.as_path()));

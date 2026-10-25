@@ -994,7 +994,6 @@ fn starter_scene_json() -> String {
     serde_json::to_string_pretty(&def).unwrap()
 }
 
-
 fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     use std::time::Instant;
 
@@ -1091,7 +1090,8 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     let t5 = Instant::now();
     let iters_bridge = 20u32;
     for _ in 0..iters_bridge {
-        let _ = kine_session::dispatch_agent_tool(&mut studio, "studio_status", &serde_json::json!({}));
+        let _ =
+            kine_session::dispatch_agent_tool(&mut studio, "studio_status", &serde_json::json!({}));
     }
     let bridge_ms = t5.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_bridge);
 
@@ -1122,7 +1122,8 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
         };
         let start_marker = "<!-- BENCHMARK_TABLE_START -->";
         let end_marker = "<!-- BENCHMARK_TABLE_END -->";
-        let (Some(s_idx), Some(e_idx)) = (content.find(start_marker), content.find(end_marker)) else {
+        let (Some(s_idx), Some(e_idx)) = (content.find(start_marker), content.find(end_marker))
+        else {
             eprintln!("README {readme_path} is missing {start_marker} .. {end_marker} markers");
             return ExitCode::FAILURE;
         };
@@ -1132,11 +1133,9 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
         }
         let mut updated = String::with_capacity(content.len() + md_table.len() + 64);
         updated.push_str(&content[..s_idx + start_marker.len()]);
-        updated.push('
-');
+        updated.push('\n');
         updated.push_str(&md_table);
-        updated.push('
-');
+        updated.push('\n');
         updated.push_str(&content[e_idx..]);
         if let Err(e) = std::fs::write(&readme_path, updated) {
             eprintln!("write {readme_path}: {e}");
@@ -1828,7 +1827,9 @@ mod tests {
 
     /// Spawns a single-request mock TCP socket server that captures the JSON-RPC
     /// request sent by `run_agent_cli` and replies with `response_json`.
-    fn spawn_mock_bridge_once(response_json: Value) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
+    fn spawn_mock_bridge_once(
+        response_json: Value,
+    ) -> (String, mpsc::Receiver<Value>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock TCP listener");
         let addr = listener.local_addr().unwrap().to_string();
         let (tx, rx) = mpsc::channel();
@@ -1871,7 +1872,11 @@ mod tests {
     }
 
     /// Execute `run_agent_cli` against a mocked TCP socket and return `(ExitCode, captured_request)`.
-    fn run_with_mock_tcp(cli_tokens: &[&str], expected_tool: &str, payload: Value) -> (ExitCode, Value) {
+    fn run_with_mock_tcp(
+        cli_tokens: &[&str],
+        expected_tool: &str,
+        payload: Value,
+    ) -> (ExitCode, Value) {
         let (addr, rx, handle) = spawn_mock_bridge_once(ok_bridge_reply(expected_tool, payload));
         let mut full_args = args(cli_tokens);
         full_args.push("--addr".to_string());
@@ -1903,7 +1908,11 @@ mod tests {
 
     #[test]
     fn agent_cli_inspection_and_selection_commands_over_mock_tcp() {
-        let (code, req) = run_with_mock_tcp(&["look", "--out", "/tmp/frame.png"], "studio_look", json!({}));
+        let (code, req) = run_with_mock_tcp(
+            &["look", "--out", "/tmp/frame.png"],
+            "studio_look",
+            json!({}),
+        );
         assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(req["params"]["outPath"], "/tmp/frame.png");
 
@@ -1913,7 +1922,8 @@ mod tests {
         let (code, _) = run_with_mock_tcp(&["timeline"], "studio_timeline", json!({}));
         assert_eq!(code, ExitCode::SUCCESS);
 
-        let (code, req) = run_with_mock_tcp(&["inspect", "--node", "#2"], "studio_inspect", json!({}));
+        let (code, req) =
+            run_with_mock_tcp(&["inspect", "--node", "#2"], "studio_inspect", json!({}));
         assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(req["params"]["nodeId"], 2);
 
@@ -1942,7 +1952,8 @@ mod tests {
             assert_eq!(req["params"]["action"], action);
         }
 
-        let (code, req) = run_with_mock_tcp(&["step", "--delta", "-3"], "studio_transport", json!({}));
+        let (code, req) =
+            run_with_mock_tcp(&["step", "--delta", "-3"], "studio_transport", json!({}));
         assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(req["params"]["action"], "step");
         assert_eq!(req["params"]["deltaFrames"], -3);
@@ -2030,11 +2041,16 @@ mod tests {
         assert_eq!(req["params"]["opacity"], 0.85);
         assert_eq!(req["params"]["undoLabel"], "Add card");
 
-        let (code, req) = run_with_mock_tcp(&["delete", "--node", "3"], "studio_delete_node", json!({}));
+        let (code, req) =
+            run_with_mock_tcp(&["delete", "--node", "3"], "studio_delete_node", json!({}));
         assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(req["params"]["nodeId"], 3);
 
-        let (code, req) = run_with_mock_tcp(&["duplicate", "--node", "3"], "studio_duplicate_node", json!({}));
+        let (code, req) = run_with_mock_tcp(
+            &["duplicate", "--node", "3"],
+            "studio_duplicate_node",
+            json!({}),
+        );
         assert_eq!(code, ExitCode::SUCCESS);
         assert_eq!(req["params"]["nodeId"], 3);
 
@@ -2168,21 +2184,8 @@ mod tests {
 
         let (code, req) = run_with_mock_tcp(
             &[
-                "animate",
-                "--node",
-                "2",
-                "--prop",
-                "opacity",
-                "--from",
-                "0",
-                "--to",
-                "1",
-                "--start",
-                "0.1",
-                "--end",
-                "0.9",
-                "--easing",
-                "spring",
+                "animate", "--node", "2", "--prop", "opacity", "--from", "0", "--to", "1",
+                "--start", "0.1", "--end", "0.9", "--easing", "spring",
             ],
             "studio_add_animation",
             json!({}),
@@ -2275,7 +2278,11 @@ mod tests {
         assert_eq!(req["params"]["path"], "demos/intro.ts");
 
         let (code, req) = run_with_mock_tcp(
-            &["apply", "--inline", r#"{"width":1280,"height":720,"root":{"kind":"container"}}"#],
+            &[
+                "apply",
+                "--inline",
+                r#"{"width":1280,"height":720,"root":{"kind":"container"}}"#,
+            ],
             "studio_apply_source",
             json!({}),
         );
@@ -2300,7 +2307,13 @@ mod tests {
         assert_eq!(req["params"]["out"], "out.mp4");
 
         let (code, req) = run_with_mock_tcp(
-            &["call", "--tool", "studio_status", "--args", r#"{"verbose":true}"#],
+            &[
+                "call",
+                "--tool",
+                "studio_status",
+                "--args",
+                r#"{"verbose":true}"#,
+            ],
             "studio_status",
             json!({}),
         );

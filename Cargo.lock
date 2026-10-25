@@ -2471,16 +2471,12 @@ dependencies = [
 name = "kine-studio"
 version = "0.1.0"
 dependencies = [
- "image",
  "kine-core",
  "kine-render",
- "kine-script",
  "kine-server",
  "kine-session",
- "kine-shader",
  "serde",
  "serde_json",
- "thiserror 2.0.21",
  "xilem",
 ]
 
@@ -3019,6 +3015,16 @@ dependencies = [
  "indexmap",
  "rustc-hash 1.1.0",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "nasm-rs"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "706bf8a5e8c8ddb99128c3291d31bd21f4bcde17f0f4c20ec678d85c74faa149"
+dependencies = [
+ "jobserver",
+ "log",
 ]
 
 [[package]]
@@ -4451,6 +4457,7 @@ dependencies = [
  "av1-grain",
  "bitstream-io 4.10.0",
  "built 0.8.1",
+ "cc",
  "cfg-if",
  "interpolate_name",
  "itertools 0.14.0",
@@ -4458,6 +4465,7 @@ dependencies = [
  "libfuzzer-sys",
  "log",
  "maybe-rayon",
+ "nasm-rs",
  "new_debug_unreachable",
  "noop_proc_macro",
  "num-derive",
