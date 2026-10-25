@@ -434,7 +434,9 @@ fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
     assert_eq!(mp4_report.encoder, VideoEncoder::H266Software);
     assert_eq!(mp4_report.frames, 8);
     assert_eq!(mp4_report.samples, 8);
-    assert_eq!(mp4_report.keyframes, 2);
+    // The H.266 encoder is intra-only: every access unit is an IDR_N_LP, so
+    // every sample is a sync sample (`keyframe_interval` is not honoured).
+    assert_eq!(mp4_report.keyframes, 8);
     assert!(has(&mp4_report.bytes, b"ftyp"));
     assert!(has(&mp4_report.bytes, b"vvc1"), "missing vvc1 sample entry");
     assert!(has(&mp4_report.bytes, b"vvcC"), "missing vvcC config box");
@@ -454,5 +456,5 @@ fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
     };
     let mkv_report = kine_server::render_video(&mut engine, handle, &mkv_opts).expect("h266 mkv");
     assert_eq!(&mkv_report.bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
-    assert!(has(&mkv_report.bytes, b"V_MPEGH/ISO/VVC"));
+    assert!(has(&mkv_report.bytes, b"V_MPEGI/ISO/VVC"));
 }

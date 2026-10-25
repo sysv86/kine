@@ -1,7 +1,7 @@
 //! Container muxing for Kine:
 //! * **MP4 (`.mp4`)** via `muxfin` and [`vvc::VvcMp4Muxer`] (ISO-BMFF, `av01` + `vvc1` + `avc1` + `dfLa` FLAC).
 //! * **Matroska (`.mkv`) & WebM (`.webm`)** via [`mkv::MkvMuxer`] (EBML v1 /
-//!   Matroska v4, `V_AV1` + `V_MPEGH/ISO/VVC` + `V_MPEG4/ISO/AVC` + `A_FLAC`).
+//!   Matroska v4, `V_AV1` + `V_MPEGI/ISO/VVC` + `V_MPEG4/ISO/AVC` + `A_FLAC`).
 //! * **Hardware H.264 encode (`hwencode`)** via `gpu-video` (Vulkan Video on Linux, VideoToolbox on macOS).
 
 #[cfg(feature = "hwencode")]

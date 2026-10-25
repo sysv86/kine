@@ -8,11 +8,12 @@ license.workspace = true
 muxfin.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+kine-encode.workspace = true
 
 [features]
 default = []
 # Hardware encode (Vulkan Video) plus the wgpu-texture input path.
-hwencode = ["dep:gpu-video", "dep:wgpu", "dep:kine-encode", "dep:pollster"]
+hwencode = ["dep:gpu-video", "dep:wgpu", "dep:pollster"]
 
 # `wgpu` is the feature the zero-copy texture path needs; the workspace entry
 # already selects it (with default features off).
@@ -27,9 +28,5 @@ workspace = true
 optional = true
 
 [dependencies.pollster]
-workspace = true
-optional = true
-
-[dependencies.kine-encode]
 workspace = true
 optional = true

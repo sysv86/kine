@@ -222,7 +222,7 @@ impl<W: Write> MkvMuxer<W> {
         let codec_id = match self.codec {
             Codec::Av1 => "V_AV1",
             Codec::H264 => "V_MPEG4/ISO/AVC",
-            Codec::H266 => "V_MPEGH/ISO/VVC",
+            Codec::H266 => "V_MPEGI/ISO/VVC",
         };
         write_str_el(&mut v_entry, &[0x86], codec_id);
         if let Some(priv_bytes) = &self.video_codec_private {
@@ -505,6 +505,6 @@ mod tests {
         mkv.push_video(0, &keyframe, true).unwrap();
         let bytes = mkv.finalize().unwrap();
         assert_eq!(&bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
-        assert!(bytes.windows(15).any(|w| w == b"V_MPEGH/ISO/VVC"));
+        assert!(bytes.windows(15).any(|w| w == b"V_MPEGI/ISO/VVC"));
     }
 }

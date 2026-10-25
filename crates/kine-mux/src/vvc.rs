@@ -76,40 +76,104 @@ pub fn annexb_to_vvcc_packets(data: &[u8]) -> (VvcParamSets, Vec<u8>) {
     (params, out)
 }
 
-/// Build an ISO/IEC 14496-15:2022 Section 11.2.4.2.2 `VvcDecoderConfigurationRecord` (`vvcC` payload).
+/// Build an ISO/IEC 14496-15 `VvcDecoderConfigurationRecord` (`vvcC` payload).
+///
+/// The record layout mirrors the widely deployed FFmpeg writer
+/// (`ff_isom_write_vvcc`): the PTL is byte-aligned, `general_constraints_info`
+/// is stored as `num_bytes_constraint_info` bytes holding
+/// `ptl_frame_only_constraint_flag`, `ptl_multilayer_enabled_flag` and the
+/// `general_constraints_info()` bits, and every array carries `num_nalus`
+/// except OPI/DCI (which can appear only once).
+///
+/// The profile/tier/level/chroma/bit-depth values and the constraint bits are
+/// read from the SPS itself rather than guessed from an arbitrary byte offset.
 pub fn build_vvcc_record(params: &VvcParamSets, width: u32, height: u32) -> Vec<u8> {
-    let level_idc = params
+    use kine_encode::vvc::bits::BitWriter;
+    use kine_encode::vvc::{hls::select_level_idc, parse_vvc_sps_info};
+
+    // `VvcParamSets` stores complete NAL units (2-byte VVC header + RBSP).
+    let info = params
         .sps
+        .as_deref()
+        .and_then(|nal| parse_vvc_sps_info(nal.get(2..)?))
+        .filter(|info| info.sps_id == 0);
+
+    let (profile_idc, tier_flag, level_idc, frame_only, multilayer, chroma_format_idc) = match &info
+    {
+        Some(info) => (
+            info.profile_idc,
+            info.tier_flag,
+            info.level_idc,
+            info.frame_only_constraint,
+            info.multilayer_enabled,
+            info.chroma_format_idc,
+        ),
+        None => (
+            1, // Main 10
+            false,
+            select_level_idc(width, height),
+            true, // progressive / frame-only
+            false,
+            1, // 4:2:0
+        ),
+    };
+    let bit_depth_minus8 = info
         .as_ref()
-        .and_then(|sps| sps.get(5).copied())
-        .unwrap_or(51);
+        .map(|info| info.bit_depth_luma.saturating_sub(8))
+        .unwrap_or(0)
+        .min(7);
+    let gci_bits = info.as_ref().map(|info| info.gci_bits.as_slice());
+
+    // `ptl_frame_only_constraint_flag` + `ptl_multilayer_enabled_flag` +
+    // `general_constraints_info()` bits, rounded up to a whole number of bytes.
+    let constraint_bits = 2 + gci_bits.map(|bits| bits.len()).unwrap_or(0);
+    let num_bytes_constraint_info = constraint_bits.div_ceil(8).max(1);
 
     let mut rec = Vec::with_capacity(128);
-    // Byte 0: reserved('11111'b) | LengthSizeMinusOne(3 => 4-byte NAL length) | ptl_present_flag(1)
-    rec.push(0b1111_1111);
-    // Bytes 1..=2: ols_idx(9 bits = 0) | num_sublayers(3 bits = 1) | constant_frame_rate(2 bits = 1) | chroma_format_idc(2 bits = 1 => 4:2:0)
-    let word1: u16 = (1 << 4) | (1 << 2) | 1;
-    rec.extend_from_slice(&word1.to_be_bytes());
-    // Byte 3: bit_depth_minus8(3 bits = 0) | reserved('11111'b)
-    rec.push(0b0001_1111);
+    // bit(5) reserved = '11111', LengthSizeMinusOne = 3 (4-byte NAL lengths),
+    // ptl_present_flag = 1.
+    rec.push(0b1111_1000 | (3 << 1) | 1);
+    // ols_idx(9) = 0, num_sublayers(3) = 1, constant_frame_rate(2) = 1,
+    // chroma_format_idc(2).
+    let word: u16 = (1 << 4) | (1 << 2) | u16::from(chroma_format_idc & 0x3);
+    rec.extend_from_slice(&word.to_be_bytes());
+    // bit_depth_minus8(3) | reserved(5) = '11111'.
+    rec.push((bit_depth_minus8 << 5) | 0x1f);
 
-    // VvcPTLRecord(1):
-    // reserved('00'b) | num_bytes_constraint_info(6 bits = 1)
-    rec.push(0x01);
-    // general_profile_idc(7 bits = 1 Main 10) | general_tier_flag(1 bit = 0)
-    rec.push(1 << 1);
-    // general_level_idc(8 bits)
+    // VvcPTLRecord: reserved(2) | num_bytes_constraint_info(6).
+    rec.push((num_bytes_constraint_info as u8) & 0x3f);
+    // general_profile_idc(7) | general_tier_flag(1).
+    rec.push((profile_idc << 1) | u8::from(tier_flag));
     rec.push(level_idc);
-    // ptl_frame_only_constraint_flag(1 = 1) | ptl_multi_layer_enabled_flag(1 = 0) | general_constraint_info(6 bits = 0)
-    rec.push(0x80);
-    // num_sub_profiles(8 bits = 0)
-    rec.push(0x00);
 
-    // max_picture_width (u16), max_picture_height (u16), avg_frame_rate (u16 = 0)
-    rec.extend_from_slice(&(width.min(u16::MAX as u32) as u16).to_be_bytes());
-    rec.extend_from_slice(&(height.min(u16::MAX as u32) as u16).to_be_bytes());
-    rec.extend_from_slice(&0u16.to_be_bytes());
+    {
+        let mut bw = BitWriter::new();
+        bw.write_bit(frame_only);
+        bw.write_bit(multilayer);
+        if let Some(bits) = gci_bits {
+            for &bit in bits {
+                bw.write_bit(bit);
+            }
+        }
+        while bw.bits_written() < num_bytes_constraint_info * 8 {
+            bw.write_bit(false);
+        }
+        rec.extend_from_slice(&bw.into_bytes());
+    }
 
+    rec.push(0); // ptl_num_sub_profiles
+
+    let coded_width = info.as_ref().map(|info| info.coded_width).unwrap_or(width);
+    let coded_height = info
+        .as_ref()
+        .map(|info| info.coded_height)
+        .unwrap_or(height);
+    rec.extend_from_slice(&(coded_width.min(u16::MAX as u32) as u16).to_be_bytes());
+    rec.extend_from_slice(&(coded_height.min(u16::MAX as u32) as u16).to_be_bytes());
+    rec.extend_from_slice(&0u16.to_be_bytes()); // avg_frame_rate (unspecified)
+
+    // Arrays: OPI and DCI carry a single NAL unit without `num_nalus`; every
+    // other set is a normal count-prefixed array.
     let mut arrays: Vec<(u8, &[u8])> = Vec::new();
     if let Some(opi) = params.opi.as_deref() {
         arrays.push((12, opi));
@@ -129,10 +193,10 @@ pub fn build_vvcc_record(params: &VvcParamSets, width: u32, height: u32) -> Vec<
 
     rec.push(arrays.len() as u8);
     for (nal_type, nalu) in arrays {
-        // array_completeness(1 = 1) | reserved(2 = 0) | NAL_unit_type(5)
+        // array_completeness(1) = 1 | reserved(2) = 0 | NAL_unit_type(5).
         rec.push(0x80 | (nal_type & 0x1F));
-        if nal_type != 13 && nal_type != 12 {
-            rec.extend_from_slice(&1u16.to_be_bytes()); // num_nalus = 1
+        if nal_type != 12 && nal_type != 13 {
+            rec.extend_from_slice(&1u16.to_be_bytes());
         }
         rec.extend_from_slice(&(nalu.len() as u16).to_be_bytes());
         rec.extend_from_slice(nalu);

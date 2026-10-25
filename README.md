@@ -81,9 +81,11 @@ cargo build --release -p kine-cli
 # Server build with NASM assembly acceleration for rav1e
 cargo build --release -p kine-cli --features asm
 
-# Render with software H.266 / VVC (ISO-BMFF vvc1/vvcC MP4 or Matroska V_MPEGH/ISO/VVC MKV)
+# Render with software H.266 / VVC (ISO-BMFF vvc1/vvcC MP4 or Matroska V_MPEGI/ISO/VVC MKV)
 cargo run --release -p kine-cli -- render --scene examples/hello/scene.ts --out out.mp4 --encoder h266
 cargo run --release -p kine-cli -- render --scene examples/hello/scene.ts --out out.mkv --encoder vvc
+# --quality 0 selects the lossless transform-skip point (QP 4); the encoder is
+# intra-only, so every frame is an IDR keyframe.  See docs/vvc-bitstream.md.
 
 # Launch desktop Kine Studio (standalone binary or CLI with studio-ui feature)
 cargo run --release -p kine-studio -- --scene examples/hello/scene.ts
@@ -148,9 +150,9 @@ kine modules --dir ./project
 - `crates/kine-text` — Self-contained font loading and text shaping (`cosmic-text`).
 - `crates/kine-shader` — WGSL shader validation (`naga`), uniform reflection, and deterministic multi-threaded CPU WGSL fragment VM.
 - `crates/kine-render` — Unified CPU (`vello_cpu`) and optional GPU (`vello_gpu` + `wgpu`) frame renderer, procedural/container video input cache, and multi-format still export (`PNG`, `QOI`, `BMP`, `PPM`, `PAM`, `TGA`, `GIF89a`).
-- `crates/kine-encode` — Software AV1 (`rav1e`, with optional `asm` NASM/GAS feature), software H.266 / VVC (`vvc`, ITU-T H.266 Annex-B), `YUV4MPEG2` (`.y4m`), 16-bit fixed-point BT.709 `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
+- `crates/kine-encode` — Software AV1 (`rav1e`, with optional `asm` NASM/GAS feature), a spec-conformant intra-only H.266 / VVC encoder (`vvc`, ITU-T H.266 Annex-B with real CABAC and transform-skip residual coding; verified byte-exactly against VVdeC, FFmpeg and VTM via `scripts/verify-vvc.sh`), `YUV4MPEG2` (`.y4m`), 16-bit fixed-point BT.709 `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
 - `crates/kine-audio` — Waveform synthesis, file decoding (`symphonia`), resampling (`rubato`), biquad EQ, dynamic range compression, sidechain ducking, and `WAV`/`FLAC`/`AIFF` output.
-- `crates/kine-mux` — ISO-BMFF `.mp4` (`av01`, `vvc1`/`vvcC`, `avc1`, `dfLa` FLAC) and Matroska `.mkv` / `.webm` (`V_AV1`, `V_MPEGH/ISO/VVC`, `V_MPEG4/ISO/AVC`, `A_FLAC`) muxers, plus optional hardware H.264 encoding (`gpu-video`).
+- `crates/kine-mux` — ISO-BMFF `.mp4` (`av01`, `vvc1`/`vvcC`, `avc1`, `dfLa` FLAC) and Matroska `.mkv` / `.webm` (`V_AV1`, `V_MPEGI/ISO/VVC`, `V_MPEG4/ISO/AVC`, `A_FLAC`) muxers, plus optional hardware H.264 encoding (`gpu-video`).
 - `crates/kine-script` — TypeScript stripping (`oxc`), embedded QuickJS (`rquickjs`, compiled via `cc`) evaluation, and JSON/TS scene authoring schema (`SceneDef`, `NodeDef`).
 - `crates/kine-platform` — Host OS detection (`Linux`, `Windows`, `macOS`) and output path resolution (`KINE_OUTPUT_DIR`).
 - `crates/kine-server` — In-process `Engine` API, static scene inspector, snapshot pixel-diff gate, and newline-delimited JSON-RPC TCP server.
