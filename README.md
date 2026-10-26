@@ -57,12 +57,12 @@ The benchmark table below is populated **only** when the manual **Benchmark (`wo
 <!-- BENCHMARK_TABLE_START -->
 | Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |
 | :--- | :--- | ---: | ---: | ---: | :--- |
-| **Scene Parse + Static Inspect** | 1280×720 AST | `10.63 ms/op` | `94.1 ops/s` | — | `linux` (`x86_64`) |
-| **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `13.22 ms/frame` | `75.6 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
-| **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `0.91 ms/frame` | `1104.3 fps` | `1,382,400 B` | `16-bit int + MT` |
-| **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | `58.92 ms/frame` | `17.0 fps` | `27076 B` | `ffmpeg libvvenc` |
-| **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `80.41 ms/frame` | `12.4 fps` | `11922 B` | `rav1e (asm=false)` |
-| **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.01 ms/call` | `69897.6 calls/s` | — | `in-process` |
+| **Scene Parse + Static Inspect** | 1280×720 AST | `0.29 ms/op` | `3459.0 ops/s` | — | `linux` (`x86_64`) |
+| **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `1.96 ms/frame` | `509.7 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
+| **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `2.12 ms/frame` | `472.3 fps` | `1,382,400 B` | `16-bit int + MT` |
+| **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | `94.27 ms/frame` | `10.6 fps` | `27098 B` | `ffmpeg libvvenc` |
+| **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `50.59 ms/frame` | `19.8 fps` | `11896 B` | `rav1e (asm=true)` |
+| **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.02 ms/call` | `44221.6 calls/s` | — | `in-process` |
 <!-- BENCHMARK_TABLE_END -->
 
 The H.266 row uses FFmpeg with `libvvenc`; if it is missing, the row reports
