@@ -8,6 +8,7 @@
 pub mod hwencode;
 pub mod mkv;
 pub mod vvc;
+mod vvc_ps;
 
 pub use mkv::{EbmlDocType, MkvMuxer};
 pub use vvc::{annexb_to_vvcc_packets, build_vvcc_record, VvcMp4Muxer, VvcParamSets};

@@ -40,7 +40,7 @@ pub fn pixmap_to_xilem_image(pixmap: &RasterPixmap) -> xilem::masonry::peniko::I
     }
 }
 
-/// Complete semantic palette for Kine Studio (Graphite / Paper / Obsidian + AccentPreset).
+/// Complete semantic palette for Kine Studio (Gruvbox Material dark/light/soft + accent presets).
 #[cfg(feature = "xilem-ui")]
 #[derive(Debug, Clone, Copy)]
 pub struct StudioPalette {
@@ -118,150 +118,150 @@ pub struct StudioPalette {
 
 #[cfg(feature = "xilem-ui")]
 impl StudioPalette {
-    /// Warm Graphite, the primary studio theme.
+    /// Gruvbox Material Dark (medium contrast).
     pub const fn graphite() -> Self {
         Self {
-            bg_shell: Color::from_rgb8(18, 17, 15),
-            bg_surface: Color::from_rgb8(32, 30, 27),
-            bg_inset: Color::from_rgb8(23, 22, 20),
-            bg_raised: Color::from_rgb8(43, 40, 37),
-            bg_elevated: Color::from_rgb8(53, 49, 45),
-            bg_stage: Color::from_rgb8(13, 12, 11),
+            bg_shell: Color::from_rgb8(40, 40, 40),
+            bg_surface: Color::from_rgb8(50, 48, 47),
+            bg_inset: Color::from_rgb8(29, 32, 33),
+            bg_raised: Color::from_rgb8(60, 56, 54),
+            bg_elevated: Color::from_rgb8(80, 73, 69),
+            bg_stage: Color::from_rgb8(29, 32, 33),
 
-            border: Color::from_rgba8(255, 255, 255, 20),
-            border_strong: Color::from_rgba8(255, 255, 255, 38),
-            border_accent: Color::from_rgba8(61, 228, 168, 115),
+            border: Color::from_rgba8(168, 153, 132, 40),
+            border_strong: Color::from_rgba8(168, 153, 132, 70),
+            border_accent: Color::from_rgba8(169, 182, 101, 130),
 
-            text: Color::from_rgb8(245, 243, 241),
-            text_soft: Color::from_rgb8(216, 214, 211),
-            muted: Color::from_rgb8(162, 159, 156),
-            off: Color::from_rgb8(116, 114, 111),
+            text: Color::from_rgb8(221, 199, 161),
+            text_soft: Color::from_rgb8(212, 190, 152),
+            muted: Color::from_rgb8(168, 153, 132),
+            off: Color::from_rgb8(146, 131, 116),
 
-            accent: Color::from_rgb8(61, 228, 168),
-            accent_hover: Color::from_rgb8(84, 245, 184),
-            accent_ink: Color::from_rgb8(65, 230, 170),
-            on_accent: Color::from_rgb8(0, 28, 17),
-            accent_wash: Color::from_rgba8(61, 228, 168, 38),
+            accent: Color::from_rgb8(169, 182, 101),
+            accent_hover: Color::from_rgb8(184, 196, 111),
+            accent_ink: Color::from_rgb8(169, 182, 101),
+            on_accent: Color::from_rgb8(40, 40, 40),
+            accent_wash: Color::from_rgba8(169, 182, 101, 40),
 
-            selection: Color::from_rgb8(75, 163, 210),
-            selection_wash: Color::from_rgba8(75, 163, 210, 40),
-            playhead: Color::from_rgb8(245, 243, 241),
+            selection: Color::from_rgb8(125, 174, 163),
+            selection_wash: Color::from_rgba8(125, 174, 163, 40),
+            playhead: Color::from_rgb8(221, 199, 161),
 
-            danger: Color::from_rgb8(255, 156, 148),
-            danger_wash: Color::from_rgba8(255, 92, 82, 34),
-            warning: Color::from_rgb8(255, 185, 0),
-            warning_wash: Color::from_rgba8(255, 185, 0, 30),
+            danger: Color::from_rgb8(234, 105, 98),
+            danger_wash: Color::from_rgba8(234, 105, 98, 36),
+            warning: Color::from_rgb8(216, 166, 87),
+            warning_wash: Color::from_rgba8(216, 166, 87, 34),
 
-            media: Color::from_rgb8(0, 227, 255),
-            container: Color::from_rgb8(245, 166, 35),
-            audio: Color::from_rgb8(155, 114, 242),
-            audio_wash: Color::from_rgba8(96, 67, 141, 110),
+            media: Color::from_rgb8(125, 174, 163),
+            container: Color::from_rgb8(216, 166, 87),
+            audio: Color::from_rgb8(211, 134, 155),
+            audio_wash: Color::from_rgba8(211, 134, 155, 110),
 
-            clip: Color::from_rgb8(46, 54, 50),
-            clip_active: Color::from_rgb8(38, 88, 70),
-            clip_shader: Color::from_rgb8(30, 70, 88),
+            clip: Color::from_rgb8(60, 56, 54),
+            clip_active: Color::from_rgb8(74, 92, 58),
+            clip_shader: Color::from_rgb8(47, 62, 68),
 
-            hover: Color::from_rgba8(255, 255, 255, 18),
-            press: Color::from_rgba8(255, 255, 255, 30),
-            scrim: Color::from_rgba8(8, 8, 10, 185),
+            hover: Color::from_rgba8(221, 199, 161, 18),
+            press: Color::from_rgba8(221, 199, 161, 30),
+            scrim: Color::from_rgba8(29, 32, 33, 185),
         }
     }
 
-    /// Carbon Obsidian, ultra-deep high-contrast OLED dark theme.
+    /// Gruvbox Material Soft (lighter dark surfaces).
     pub const fn obsidian() -> Self {
         Self {
-            bg_shell: Color::from_rgb8(8, 8, 10),
-            bg_surface: Color::from_rgb8(18, 18, 22),
-            bg_inset: Color::from_rgb8(12, 12, 15),
-            bg_raised: Color::from_rgb8(28, 28, 34),
-            bg_elevated: Color::from_rgb8(38, 38, 46),
-            bg_stage: Color::from_rgb8(5, 5, 7),
+            bg_shell: Color::from_rgb8(50, 48, 47),
+            bg_surface: Color::from_rgb8(60, 56, 54),
+            bg_inset: Color::from_rgb8(40, 40, 40),
+            bg_raised: Color::from_rgb8(80, 73, 69),
+            bg_elevated: Color::from_rgb8(102, 92, 84),
+            bg_stage: Color::from_rgb8(29, 32, 33),
 
-            border: Color::from_rgba8(255, 255, 255, 22),
-            border_strong: Color::from_rgba8(255, 255, 255, 44),
-            border_accent: Color::from_rgba8(61, 228, 168, 130),
+            border: Color::from_rgba8(168, 153, 132, 44),
+            border_strong: Color::from_rgba8(168, 153, 132, 76),
+            border_accent: Color::from_rgba8(169, 182, 101, 136),
 
-            text: Color::from_rgb8(250, 250, 252),
-            text_soft: Color::from_rgb8(224, 224, 230),
-            muted: Color::from_rgb8(158, 160, 170),
-            off: Color::from_rgb8(108, 110, 120),
+            text: Color::from_rgb8(221, 199, 161),
+            text_soft: Color::from_rgb8(212, 190, 152),
+            muted: Color::from_rgb8(168, 153, 132),
+            off: Color::from_rgb8(146, 131, 116),
 
-            accent: Color::from_rgb8(61, 228, 168),
-            accent_hover: Color::from_rgb8(92, 248, 190),
-            accent_ink: Color::from_rgb8(72, 236, 176),
-            on_accent: Color::from_rgb8(0, 24, 14),
-            accent_wash: Color::from_rgba8(61, 228, 168, 42),
+            accent: Color::from_rgb8(169, 182, 101),
+            accent_hover: Color::from_rgb8(189, 201, 118),
+            accent_ink: Color::from_rgb8(169, 182, 101),
+            on_accent: Color::from_rgb8(40, 40, 40),
+            accent_wash: Color::from_rgba8(169, 182, 101, 44),
 
-            selection: Color::from_rgb8(56, 189, 248),
-            selection_wash: Color::from_rgba8(56, 189, 248, 44),
-            playhead: Color::from_rgb8(255, 255, 255),
+            selection: Color::from_rgb8(125, 174, 163),
+            selection_wash: Color::from_rgba8(125, 174, 163, 44),
+            playhead: Color::from_rgb8(221, 199, 161),
 
-            danger: Color::from_rgb8(255, 128, 120),
-            danger_wash: Color::from_rgba8(255, 82, 72, 38),
-            warning: Color::from_rgb8(255, 196, 24),
-            warning_wash: Color::from_rgba8(255, 196, 24, 34),
+            danger: Color::from_rgb8(234, 105, 98),
+            danger_wash: Color::from_rgba8(234, 105, 98, 40),
+            warning: Color::from_rgb8(216, 166, 87),
+            warning_wash: Color::from_rgba8(216, 166, 87, 38),
 
-            media: Color::from_rgb8(34, 211, 238),
-            container: Color::from_rgb8(251, 191, 36),
-            audio: Color::from_rgb8(168, 130, 255),
-            audio_wash: Color::from_rgba8(109, 76, 178, 120),
+            media: Color::from_rgb8(125, 174, 163),
+            container: Color::from_rgb8(216, 166, 87),
+            audio: Color::from_rgb8(211, 134, 155),
+            audio_wash: Color::from_rgba8(211, 134, 155, 118),
 
-            clip: Color::from_rgb8(34, 42, 46),
-            clip_active: Color::from_rgb8(32, 84, 68),
-            clip_shader: Color::from_rgb8(26, 64, 86),
+            clip: Color::from_rgb8(80, 73, 69),
+            clip_active: Color::from_rgb8(92, 108, 74),
+            clip_shader: Color::from_rgb8(62, 78, 84),
 
-            hover: Color::from_rgba8(255, 255, 255, 20),
-            press: Color::from_rgba8(255, 255, 255, 34),
-            scrim: Color::from_rgba8(4, 4, 6, 205),
+            hover: Color::from_rgba8(221, 199, 161, 20),
+            press: Color::from_rgba8(221, 199, 161, 34),
+            scrim: Color::from_rgba8(29, 32, 33, 205),
         }
     }
 
-    /// Warm Paper, a real daylight variant (not an inverted dark theme).
+    /// Gruvbox Material Light.
     pub const fn paper() -> Self {
         Self {
-            bg_shell: Color::from_rgb8(236, 234, 229),
-            bg_surface: Color::from_rgb8(253, 251, 248),
-            bg_inset: Color::from_rgb8(244, 242, 238),
-            bg_raised: Color::from_rgb8(255, 255, 255),
-            bg_elevated: Color::from_rgb8(247, 245, 240),
-            bg_stage: Color::from_rgb8(24, 23, 21),
+            bg_shell: Color::from_rgb8(235, 219, 178),
+            bg_surface: Color::from_rgb8(242, 229, 188),
+            bg_inset: Color::from_rgb8(224, 209, 168),
+            bg_raised: Color::from_rgb8(249, 245, 215),
+            bg_elevated: Color::from_rgb8(249, 245, 215),
+            bg_stage: Color::from_rgb8(40, 40, 40),
 
-            border: Color::from_rgba8(0, 0, 0, 22),
-            border_strong: Color::from_rgba8(0, 0, 0, 42),
-            border_accent: Color::from_rgba8(1, 130, 91, 120),
+            border: Color::from_rgba8(101, 71, 53, 28),
+            border_strong: Color::from_rgba8(101, 71, 53, 50),
+            border_accent: Color::from_rgba8(108, 120, 46, 120),
 
-            text: Color::from_rgb8(24, 23, 22),
-            text_soft: Color::from_rgb8(68, 67, 65),
-            muted: Color::from_rgb8(105, 103, 100),
-            off: Color::from_rgb8(142, 140, 136),
+            text: Color::from_rgb8(101, 71, 53),
+            text_soft: Color::from_rgb8(81, 64, 54),
+            muted: Color::from_rgb8(124, 111, 100),
+            off: Color::from_rgb8(168, 153, 132),
 
-            accent: Color::from_rgb8(1, 130, 91),
-            accent_hover: Color::from_rgb8(2, 113, 79),
-            accent_ink: Color::from_rgb8(0, 108, 76),
-            on_accent: Color::from_rgb8(255, 255, 255),
-            accent_wash: Color::from_rgba8(1, 130, 91, 30),
+            accent: Color::from_rgb8(108, 120, 46),
+            accent_hover: Color::from_rgb8(125, 138, 55),
+            accent_ink: Color::from_rgb8(92, 104, 38),
+            on_accent: Color::from_rgb8(242, 229, 188),
+            accent_wash: Color::from_rgba8(108, 120, 46, 30),
 
-            selection: Color::from_rgb8(0, 106, 165),
-            selection_wash: Color::from_rgba8(0, 106, 165, 30),
-            playhead: Color::from_rgb8(220, 38, 38),
+            selection: Color::from_rgb8(69, 112, 122),
+            selection_wash: Color::from_rgba8(69, 112, 122, 30),
+            playhead: Color::from_rgb8(193, 74, 74),
 
-            danger: Color::from_rgb8(204, 51, 54),
-            danger_wash: Color::from_rgba8(204, 51, 54, 28),
-            warning: Color::from_rgb8(142, 84, 0),
-            warning_wash: Color::from_rgba8(245, 166, 35, 34),
+            danger: Color::from_rgb8(193, 74, 74),
+            danger_wash: Color::from_rgba8(193, 74, 74, 28),
+            warning: Color::from_rgb8(180, 113, 9),
+            warning_wash: Color::from_rgba8(180, 113, 9, 30),
 
-            media: Color::from_rgb8(0, 113, 135),
-            container: Color::from_rgb8(161, 97, 0),
-            audio: Color::from_rgb8(96, 67, 141),
-            audio_wash: Color::from_rgba8(96, 67, 141, 34),
+            media: Color::from_rgb8(69, 112, 122),
+            container: Color::from_rgb8(180, 113, 9),
+            audio: Color::from_rgb8(148, 94, 128),
+            audio_wash: Color::from_rgba8(148, 94, 128, 34),
 
-            clip: Color::from_rgb8(222, 233, 229),
-            clip_active: Color::from_rgb8(178, 226, 208),
-            clip_shader: Color::from_rgb8(206, 234, 246),
+            clip: Color::from_rgb8(224, 209, 168),
+            clip_active: Color::from_rgb8(200, 211, 160),
+            clip_shader: Color::from_rgb8(201, 219, 224),
 
-            hover: Color::from_rgba8(0, 0, 0, 14),
-            press: Color::from_rgba8(0, 0, 0, 28),
-            scrim: Color::from_rgba8(15, 14, 12, 130),
+            hover: Color::from_rgba8(101, 71, 53, 14),
+            press: Color::from_rgba8(101, 71, 53, 28),
+            scrim: Color::from_rgba8(40, 40, 40, 130),
         }
     }
 
@@ -282,73 +282,89 @@ impl StudioPalette {
         };
         let dark = settings.theme_mode.is_dark();
         match settings.accent_preset {
-            AccentPreset::KineMint => {}
+            AccentPreset::KineMint => {
+                if dark {
+                    p.accent = Color::from_rgb8(169, 182, 101);
+                    p.accent_hover = Color::from_rgb8(184, 196, 111);
+                    p.accent_ink = Color::from_rgb8(169, 182, 101);
+                    p.on_accent = Color::from_rgb8(40, 40, 40);
+                    p.accent_wash = Color::from_rgba8(169, 182, 101, 42);
+                    p.border_accent = Color::from_rgba8(169, 182, 101, 130);
+                } else {
+                    p.accent = Color::from_rgb8(108, 120, 46);
+                    p.accent_hover = Color::from_rgb8(125, 138, 55);
+                    p.accent_ink = Color::from_rgb8(92, 104, 38);
+                    p.on_accent = Color::from_rgb8(242, 229, 188);
+                    p.accent_wash = Color::from_rgba8(108, 120, 46, 30);
+                    p.border_accent = Color::from_rgba8(108, 120, 46, 120);
+                }
+            }
             AccentPreset::CinemaAmber => {
                 if dark {
-                    p.accent = Color::from_rgb8(245, 166, 35);
-                    p.accent_hover = Color::from_rgb8(255, 184, 64);
-                    p.accent_ink = Color::from_rgb8(247, 178, 59);
-                    p.on_accent = Color::from_rgb8(28, 16, 0);
-                    p.accent_wash = Color::from_rgba8(245, 166, 35, 42);
-                    p.border_accent = Color::from_rgba8(245, 166, 35, 120);
+                    p.accent = Color::from_rgb8(216, 166, 87);
+                    p.accent_hover = Color::from_rgb8(226, 181, 112);
+                    p.accent_ink = Color::from_rgb8(216, 166, 87);
+                    p.on_accent = Color::from_rgb8(40, 40, 40);
+                    p.accent_wash = Color::from_rgba8(216, 166, 87, 42);
+                    p.border_accent = Color::from_rgba8(216, 166, 87, 120);
                 } else {
-                    p.accent = Color::from_rgb8(180, 105, 0);
-                    p.accent_hover = Color::from_rgb8(155, 88, 0);
-                    p.accent_ink = Color::from_rgb8(160, 92, 0);
-                    p.on_accent = Color::from_rgb8(255, 255, 255);
-                    p.accent_wash = Color::from_rgba8(180, 105, 0, 30);
-                    p.border_accent = Color::from_rgba8(180, 105, 0, 120);
+                    p.accent = Color::from_rgb8(180, 113, 9);
+                    p.accent_hover = Color::from_rgb8(195, 128, 25);
+                    p.accent_ink = Color::from_rgb8(160, 100, 8);
+                    p.on_accent = Color::from_rgb8(242, 229, 188);
+                    p.accent_wash = Color::from_rgba8(180, 113, 9, 30);
+                    p.border_accent = Color::from_rgba8(180, 113, 9, 120);
                 }
             }
             AccentPreset::BroadcastCyan => {
                 if dark {
-                    p.accent = Color::from_rgb8(0, 227, 255);
-                    p.accent_hover = Color::from_rgb8(71, 236, 255);
-                    p.accent_ink = Color::from_rgb8(38, 231, 255);
-                    p.on_accent = Color::from_rgb8(0, 24, 30);
-                    p.accent_wash = Color::from_rgba8(0, 227, 255, 40);
-                    p.border_accent = Color::from_rgba8(0, 227, 255, 120);
+                    p.accent = Color::from_rgb8(137, 180, 130);
+                    p.accent_hover = Color::from_rgb8(153, 194, 146);
+                    p.accent_ink = Color::from_rgb8(137, 180, 130);
+                    p.on_accent = Color::from_rgb8(40, 40, 40);
+                    p.accent_wash = Color::from_rgba8(137, 180, 130, 40);
+                    p.border_accent = Color::from_rgba8(137, 180, 130, 120);
                 } else {
-                    p.accent = Color::from_rgb8(0, 118, 148);
-                    p.accent_hover = Color::from_rgb8(0, 98, 124);
-                    p.accent_ink = Color::from_rgb8(0, 104, 132);
-                    p.on_accent = Color::from_rgb8(255, 255, 255);
-                    p.accent_wash = Color::from_rgba8(0, 118, 148, 30);
-                    p.border_accent = Color::from_rgba8(0, 118, 148, 120);
+                    p.accent = Color::from_rgb8(76, 122, 93);
+                    p.accent_hover = Color::from_rgb8(92, 138, 108);
+                    p.accent_ink = Color::from_rgb8(64, 108, 80);
+                    p.on_accent = Color::from_rgb8(242, 229, 188);
+                    p.accent_wash = Color::from_rgba8(76, 122, 93, 30);
+                    p.border_accent = Color::from_rgba8(76, 122, 93, 120);
                 }
             }
             AccentPreset::StudioViolet => {
                 if dark {
-                    p.accent = Color::from_rgb8(155, 114, 242);
-                    p.accent_hover = Color::from_rgb8(177, 143, 247);
-                    p.accent_ink = Color::from_rgb8(168, 130, 245);
-                    p.on_accent = Color::from_rgb8(18, 8, 36);
-                    p.accent_wash = Color::from_rgba8(155, 114, 242, 42);
-                    p.border_accent = Color::from_rgba8(155, 114, 242, 120);
+                    p.accent = Color::from_rgb8(211, 134, 155);
+                    p.accent_hover = Color::from_rgb8(221, 153, 171);
+                    p.accent_ink = Color::from_rgb8(211, 134, 155);
+                    p.on_accent = Color::from_rgb8(40, 40, 40);
+                    p.accent_wash = Color::from_rgba8(211, 134, 155, 42);
+                    p.border_accent = Color::from_rgba8(211, 134, 155, 120);
                 } else {
-                    p.accent = Color::from_rgb8(104, 62, 196);
-                    p.accent_hover = Color::from_rgb8(86, 48, 170);
-                    p.accent_ink = Color::from_rgb8(92, 52, 180);
-                    p.on_accent = Color::from_rgb8(255, 255, 255);
-                    p.accent_wash = Color::from_rgba8(104, 62, 196, 30);
-                    p.border_accent = Color::from_rgba8(104, 62, 196, 120);
+                    p.accent = Color::from_rgb8(148, 94, 128);
+                    p.accent_hover = Color::from_rgb8(164, 110, 144);
+                    p.accent_ink = Color::from_rgb8(132, 80, 114);
+                    p.on_accent = Color::from_rgb8(242, 229, 188);
+                    p.accent_wash = Color::from_rgba8(148, 94, 128, 30);
+                    p.border_accent = Color::from_rgba8(148, 94, 128, 120);
                 }
             }
             AccentPreset::SignalCrimson => {
                 if dark {
-                    p.accent = Color::from_rgb8(255, 107, 107);
-                    p.accent_hover = Color::from_rgb8(255, 135, 135);
-                    p.accent_ink = Color::from_rgb8(255, 122, 122);
-                    p.on_accent = Color::from_rgb8(32, 4, 4);
-                    p.accent_wash = Color::from_rgba8(255, 107, 107, 42);
-                    p.border_accent = Color::from_rgba8(255, 107, 107, 120);
+                    p.accent = Color::from_rgb8(234, 105, 98);
+                    p.accent_hover = Color::from_rgb8(240, 130, 124);
+                    p.accent_ink = Color::from_rgb8(234, 105, 98);
+                    p.on_accent = Color::from_rgb8(40, 40, 40);
+                    p.accent_wash = Color::from_rgba8(234, 105, 98, 42);
+                    p.border_accent = Color::from_rgba8(234, 105, 98, 120);
                 } else {
-                    p.accent = Color::from_rgb8(198, 40, 40);
-                    p.accent_hover = Color::from_rgb8(172, 30, 30);
-                    p.accent_ink = Color::from_rgb8(180, 34, 34);
-                    p.on_accent = Color::from_rgb8(255, 255, 255);
-                    p.accent_wash = Color::from_rgba8(198, 40, 40, 30);
-                    p.border_accent = Color::from_rgba8(198, 40, 40, 120);
+                    p.accent = Color::from_rgb8(193, 74, 74);
+                    p.accent_hover = Color::from_rgb8(208, 90, 90);
+                    p.accent_ink = Color::from_rgb8(176, 62, 62);
+                    p.on_accent = Color::from_rgb8(242, 229, 188);
+                    p.accent_wash = Color::from_rgba8(193, 74, 74, 30);
+                    p.border_accent = Color::from_rgba8(193, 74, 74, 120);
                 }
             }
         }

@@ -39,10 +39,14 @@ echo "==> [6/9] Rendering short AV1 MP4 animation"
 test -s "$OUT_DIR/clip-av1.mp4"
 
 echo "==> [7/9] Rendering short H.266 / VVC MP4 and MKV animations"
-"$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/clip-h266.mp4" --frames 6 --fps 30 --encoder h266
-test -s "$OUT_DIR/clip-h266.mp4"
-"$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/clip-h266.mkv" --frames 6 --fps 30 --encoder vvc
-test -s "$OUT_DIR/clip-h266.mkv"
+if "$KINE_BIN" doctor | grep '"h266_encode_available": true' >/dev/null; then
+    "$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/clip-h266.mp4" --frames 6 --fps 30 --encoder h266
+    test -s "$OUT_DIR/clip-h266.mp4"
+    "$KINE_BIN" render --scene "$OUT_DIR/starter.json" --out "$OUT_DIR/clip-h266.mkv" --frames 6 --fps 30 --encoder vvc
+    test -s "$OUT_DIR/clip-h266.mkv"
+else
+    echo "    skipping: FFmpeg with libvvenc not found (run scripts/install-ffmpeg.sh)"
+fi
 
 echo "==> [8/9] Verifying in-process Kine Studio state & studio_look tool"
 "$KINE_BIN" studio --scene "$OUT_DIR/starter.json" --headless-check

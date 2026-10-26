@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
-/// Left dock tabs (matching Hyperframes Studio's `StudioLeftPanels`).
+/// Left dock tabs (Kine Studio left dock).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LeftDockTab {
     Compositions,
@@ -43,7 +43,7 @@ impl LeftDockTab {
     }
 }
 
-/// Right dock tabs (matching Hyperframes Studio's `StudioRightPanels`).
+/// Right dock tabs (Kine Studio right dock).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RightDockTab {
     Design,
@@ -163,7 +163,7 @@ pub struct StudioState {
     pub auto_keyframe: bool,
     pub ripple_edit: bool,
 
-    // ── Theme & Flat Inspector UX State (Hyperframes Parity) ───────────────
+    // ── Theme & Flat Inspector UX State ────────────────────────────────────
     pub dark_theme: bool,
     pub open_inspector_group: String,
     pub collapsed_nodes: BTreeSet<u64>,
@@ -344,7 +344,7 @@ impl StudioState {
         self.notify_status(format!("Theme switched to {}", mode.label()));
     }
 
-    /// Cycle through `GraphiteDark` -> `CarbonObsidian` -> `WarmPaper`.
+    /// Cycle through Gruvbox Dark -> Gruvbox Soft -> Gruvbox Light.
     pub fn cycle_theme_mode(&mut self) {
         let next = self.settings.theme_mode.next();
         self.set_theme_mode(next);
@@ -874,8 +874,8 @@ impl StudioState {
                 let cx = (fw * 0.5).round() as i32;
                 let cy = (fh * 0.5).round() as i32;
                 for d in -10..=10 {
-                    blend_pixel(&mut out, cx + d, cy, [61, 228, 168, 130]);
-                    blend_pixel(&mut out, cx, cy + d, [61, 228, 168, 130]);
+                    blend_pixel(&mut out, cx + d, cy, [169, 182, 101, 130]);
+                    blend_pixel(&mut out, cx, cy + d, [169, 182, 101, 130]);
                 }
             }
         }
@@ -885,9 +885,9 @@ impl StudioState {
                 if sel_id != NodeId(0) {
                     if let Some(rect) = self.node_abs_rect(sel_id) {
                         let ring_color = if self.topology_lens_active {
-                            [60, 230, 172, 255] // Hyperframes Mint (#3ce6ac)
+                            [169, 182, 101, 255] // Gruvbox Material Green (#a9b665)
                         } else {
-                            [75, 163, 210, 255] // Hyperframes Selection Sky (#4ba3d2)
+                            [125, 174, 163, 255] // Gruvbox Material Aqua (#7daea3)
                         };
                         draw_rect_outline(&mut out, rect, ring_color, 2, false);
                         draw_corner_handles(&mut out, rect, ring_color);
@@ -1347,9 +1347,9 @@ impl StudioState {
 
         let (container, encoder) = match fmt.as_str() {
             "h266" | "vvc" | "mp4-h266" | "mp4-vvc" => {
-                (VideoContainer::Mp4, VideoEncoder::H266Software)
+                (VideoContainer::Mp4, VideoEncoder::H266Ffmpeg)
             }
-            "mkv-h266" | "mkv-vvc" => (VideoContainer::Mkv, VideoEncoder::H266Software),
+            "mkv-h266" | "mkv-vvc" => (VideoContainer::Mkv, VideoEncoder::H266Ffmpeg),
             other => {
                 let Some(c) = VideoContainer::from_extension(other) else {
                     return Err(StudioError::Message(format!(

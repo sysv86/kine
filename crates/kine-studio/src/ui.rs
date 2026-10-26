@@ -1,7 +1,7 @@
 //! Kine Studio shell — a native Video-as-Code NLE built on Xilem `0.4.0` & Masonry `0.4.0`.
 //!
-//! Architectural & Visual Contract (`UI_GUIDELINES.md`):
-//! - Calibrated multi-theme surface ladder (`Graphite Dark`, `Warm Paper`, `Carbon Obsidian`)
+//! Studio UI contract:
+//! - Calibrated multi-theme surface ladder (`Gruvbox Dark`, `Gruvbox Light`, `Gruvbox Soft`)
 //!   with 5 signal accent presets and 3 spatial density tiers (`Compact`, `Comfortable`, `Spacious`).
 //! - Zero dead stubs: every control mutates `StudioState` / `SceneDef` and synchronizes
 //!   in-process with `kine_server::Engine`.
@@ -2384,7 +2384,7 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
         .fill
         .clone()
         .or_else(|| snap.text_color.clone())
-        .unwrap_or_else(|| "#3de4a8".to_string());
+        .unwrap_or_else(|| "#a9b665".to_string());
     kids.push(
         section_header(
             "style",
@@ -2421,14 +2421,14 @@ fn design_panel(state: &mut StudioState, t: &StudioPalette, dm: &DensityMetrics)
                 })
                 .into_any_flex(),
                 flex_row((
-                    swatch(t.accent, "#3de4a8", t),
-                    swatch(t.selection, "#4ba3d2", t),
-                    swatch(t.danger, "#f43f5e", t),
-                    swatch(t.warning, "#ffb900", t),
-                    swatch(t.media, "#00e3ff", t),
-                    swatch(t.container, "#f5a623", t),
-                    swatch(t.audio, "#9b72f2", t),
-                    swatch(Color::from_rgb8(248, 250, 252), "#f8fafc", t),
+                    swatch(t.accent, "#a9b665", t),
+                    swatch(t.selection, "#7daea3", t),
+                    swatch(t.danger, "#ea6962", t),
+                    swatch(t.warning, "#d8a657", t),
+                    swatch(t.media, "#7daea3", t),
+                    swatch(t.container, "#d8a657", t),
+                    swatch(t.audio, "#d3869b", t),
+                    swatch(Color::from_rgb8(221, 199, 161), "#ddc7a1", t),
                 ))
                 .gap(4.0_f64.px())
                 .into_any_flex(),

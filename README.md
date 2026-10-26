@@ -2,17 +2,17 @@
 
 Kine is a deterministic **Video-as-Code** engine, headless session/bridge library (`kine-session`), and **native Rust Xilem Studio** (`kine-studio`) targeting **Linux**, **Windows**, and **macOS**.
 
-**Self-contained pipeline: zero system C-library dependencies (embedded QuickJS compiled via cc).**
+**Rust-native pipeline.** No C codec is linked into the Kine binaries. H.266/VVC encoding delegates to an external FFmpeg build with `libvvenc` (BSD-3-Clause); rendering, compositing, audio DSP, and muxing run in-process.
 
 ## Supported Platforms
 
 | Platform | Architectures | Portable Default Pipeline | Optional GPU / Hardware Video (`--features gpu,hwencode,asm`) |
 | :--- | :--- | :--- | :--- |
-| **Linux** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 VVC | Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 + NASM `asm` |
-| **Windows** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 VVC | DirectX 12 / Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 + NASM `asm` |
-| **macOS** | `aarch64` (Apple Silicon), `x86_64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 VVC | Metal (`wgpu` + `vello_gpu`) + VideoToolbox H.264 + GAS `asm` |
+| **Linux** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 via FFmpeg | Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 + NASM `asm` |
+| **Windows** | `x86_64`, `aarch64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 via FFmpeg | DirectX 12 / Vulkan (`wgpu` + `vello_gpu`) + Vulkan Video H.264 + NASM `asm` |
+| **macOS** | `aarch64` (Apple Silicon), `x86_64` | `vello_cpu` + CPU WGSL VM + `rav1e` AV1 / H.266 via FFmpeg | Metal (`wgpu` + `vello_gpu`) + VideoToolbox H.264 + GAS `asm` |
 
-The default CLI build (`cargo build -p kine-cli`) compiles a headless, minimal dependency graph without Xilem, Winit, Wayland, or X11 system libraries (`taffy` layout, `cosmic-text` shaping, `vello_cpu` sparse-strip rasterization, `naga` CPU WGSL shader VM, `rav1e` AV1 and software H.266 / VVC encoders, `symphonia`/`rubato`/`flacenc` audio DSP, and `muxfin`/`mkv` container muxing).
+The default CLI build (`cargo build -p kine-cli`) compiles a headless, minimal dependency graph without Xilem, Winit, Wayland, or X11 system libraries (`taffy` layout, `cosmic-text` shaping, `vello_cpu` sparse-strip rasterization, `naga` CPU WGSL shader VM, `rav1e` AV1, an optional external FFmpeg + `libvvenc` H.266 encoder, `symphonia`/`rubato`/`flacenc` audio DSP, and `muxfin`/`mkv` container muxing).
 
 ## Kine Studio (`crates/kine-studio`) & Headless Session (`crates/kine-session`)
 
@@ -25,7 +25,7 @@ All headless Studio state (`StudioState`), NLE timeline track construction (`tim
 1. **Single-Process Engine Synchronization**:
    - `StudioState` owns `kine_server::Engine`, `SceneHandle`, and the authored `kine_script::SceneDef` AST **in the same OS process**.
    - Every edit in the Design Inspector, NLE Timeline, Code Editor, or External CLI Agent Bridge mutates `SceneDef` inside a checkpointed undo/redo transaction, rebuilds `kine_core::Scene` in-memory, evaluates animations & layout at the current playhead timestamp, and converts `vello_cpu::Pixmap` directly into `xilem::masonry::peniko::ImageData` (`AlphaPremultiplied` RGBA8) with zero IPC or process duplication.
-2. **Hyperframes-Style 4-Zone Workspace**:
+2. **Four-Zone Studio Workspace**:
    - **Header Bar**: Active composition switcher, live static inspection badge, `Backend` selector (`AUTO`/`CPU`/`GPU`), `Capture PNG`, `CLI :7701` live bridge toggle, Dock visibility toggle, and one-click `Render Export`.
    - **Left Dock**:
      - `Compositions`: Built-in starter compositions + automatic discovery of `.ts` and `.json` scenes in `examples/`.
@@ -48,7 +48,7 @@ All headless Studio state (`StudioState`), NLE timeline track construction (`tim
        - **Content, Style, Transform, WGSL Shaders & Audio**: `studio_set_text`, `studio_set_style`, `studio_transform`, `studio_set_shader`, `studio_audio`
        - **Timeline, Keyframes & Transport**: `studio_seek`, `studio_frame`, `studio_transport`, `studio_resize_canvas`, `studio_add_animation`, `studio_update_animation`, `studio_add_keyframe`, `studio_delete_keyframe`, `studio_delete_animation`, `studio_shift_time`, `studio_split`
        - **History, Scene I/O, Export & Atomic Batching**: `studio_undo`, `studio_redo`, `studio_history`, `studio_load_scene`, `studio_reload`, `studio_apply_source`, `studio_save_scene`, `studio_switch_composition`, `studio_new_composition`, `studio_export`, `studio_batch`
-     - `Renders` Queue: In-process multi-format export (`MP4` AV1 or H.266/VVC, `MKV` AV1 or H.266/VVC, `WebM`, `GIF`, `PNG`) with frame count, byte size, and output path history.
+     - `Renders` Queue: Multi-format export (`MP4` AV1 or H.266/VVC, `MKV` AV1 or H.266/VVC, `WebM`, `GIF`, `PNG`) with frame count, byte size, and output path history.
 
 ## Benchmarks
 
@@ -56,14 +56,17 @@ The benchmark table below is populated **only** when the manual **Benchmark (`wo
 
 <!-- BENCHMARK_TABLE_START -->
 | Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |
-         | :--- | :--- | ---: | ---: | ---: | :--- |
-         | **Scene Parse + Static Inspect** | 1280×720 AST | `3.47 ms/op` | `288.1 ops/s` | — | `linux` (`x86_64`) |
-         | **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `2.84 ms/frame` | `352.3 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
-         | **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `3.12 ms/frame` | `320.3 fps` | `1,382,400 B` | `16-bit int + MT` |
-         | **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | `18.91 ms/frame` | `52.9 fps` | `94150 B` | `software VVC` |
-         | **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `52.95 ms/frame` | `18.9 fps` | `11896 B` | `rav1e (asm=true)` |
-         | **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.02 ms/call` | `51958.3 calls/s` | — | `in-process` |
+| :--- | :--- | ---: | ---: | ---: | :--- |
+| **Scene Parse + Static Inspect** | 1280×720 AST | `10.63 ms/op` | `94.1 ops/s` | — | `linux` (`x86_64`) |
+| **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `13.22 ms/frame` | `75.6 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
+| **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `0.91 ms/frame` | `1104.3 fps` | `1,382,400 B` | `16-bit int + MT` |
+| **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | `58.92 ms/frame` | `17.0 fps` | `27076 B` | `ffmpeg libvvenc` |
+| **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `80.41 ms/frame` | `12.4 fps` | `11922 B` | `rav1e (asm=false)` |
+| **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.01 ms/call` | `69897.6 calls/s` | — | `in-process` |
 <!-- BENCHMARK_TABLE_END -->
+
+The H.266 row uses FFmpeg with `libvvenc`; if it is missing, the row reports
+`n/a` instead of failing the benchmark.
 
 To run the benchmark locally or update the table manually:
 
@@ -81,11 +84,15 @@ cargo build --release -p kine-cli
 # Server build with NASM assembly acceleration for rav1e
 cargo build --release -p kine-cli --features asm
 
-# Render with software H.266 / VVC (ISO-BMFF vvc1/vvcC MP4 or Matroska V_MPEGI/ISO/VVC MKV)
+# H.266 / VVC needs FFmpeg with libvvenc. Fetch the latest LGPL build once:
+./scripts/install-ffmpeg.sh
+# Then render MP4 (`vvc1`/`vvcC`) or Matroska (`V_MPEGI/ISO/VVC`):
 cargo run --release -p kine-cli -- render --scene examples/hello/scene.ts --out out.mp4 --encoder h266
 cargo run --release -p kine-cli -- render --scene examples/hello/scene.ts --out out.mkv --encoder vvc
-# --quality 0 selects the lossless transform-skip point (QP 4); the encoder is
-# intra-only, so every frame is an IDR keyframe.  See docs/vvc-bitstream.md.
+# The FFmpeg path is configured all-intra (IntraPeriod=1); --quality maps to QP 4..63.
+# Set KINE_FFMPEG=/path/to/ffmpeg to use an existing build with --enable-libvvenc.
+# BtbN publishes no macOS binary with libvvenc; on macOS build FFmpeg with
+# --enable-libvvenc (vvenc is BSD-3-Clause) and point KINE_FFMPEG at it.
 
 # Launch desktop Kine Studio (standalone binary or CLI with studio-ui feature)
 cargo run --release -p kine-studio -- --scene examples/hello/scene.ts
@@ -150,7 +157,7 @@ kine modules --dir ./project
 - `crates/kine-text` — Self-contained font loading and text shaping (`cosmic-text`).
 - `crates/kine-shader` — WGSL shader validation (`naga`), uniform reflection, and deterministic multi-threaded CPU WGSL fragment VM.
 - `crates/kine-render` — Unified CPU (`vello_cpu`) and optional GPU (`vello_gpu` + `wgpu`) frame renderer, procedural/container video input cache, and multi-format still export (`PNG`, `QOI`, `BMP`, `PPM`, `PAM`, `TGA`, `GIF89a`).
-- `crates/kine-encode` — Software AV1 (`rav1e`, with optional `asm` NASM/GAS feature), a spec-conformant intra-only H.266 / VVC encoder (`vvc`, ITU-T H.266 Annex-B with real CABAC and transform-skip residual coding; verified byte-exactly against VVdeC, FFmpeg and VTM via `scripts/verify-vvc.sh`), `YUV4MPEG2` (`.y4m`), 16-bit fixed-point BT.709 `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
+- `crates/kine-encode` — Software AV1 (`rav1e`, with optional `asm` NASM/GAS feature), H.266/VVC through an external FFmpeg + `libvvenc` process (`ffmpeg` module; no custom VVC codec), `YUV4MPEG2` (`.y4m`), 16-bit fixed-point BT.709 `RGBA8`/`I420`/`NV12`, and indexed lossless `.kvid` encoders.
 - `crates/kine-audio` — Waveform synthesis, file decoding (`symphonia`), resampling (`rubato`), biquad EQ, dynamic range compression, sidechain ducking, and `WAV`/`FLAC`/`AIFF` output.
 - `crates/kine-mux` — ISO-BMFF `.mp4` (`av01`, `vvc1`/`vvcC`, `avc1`, `dfLa` FLAC) and Matroska `.mkv` / `.webm` (`V_AV1`, `V_MPEGI/ISO/VVC`, `V_MPEG4/ISO/AVC`, `A_FLAC`) muxers, plus optional hardware H.264 encoding (`gpu-video`).
 - `crates/kine-script` — TypeScript stripping (`oxc`), embedded QuickJS (`rquickjs`, compiled via `cc`) evaluation, and JSON/TS scene authoring schema (`SceneDef`, `NodeDef`).

@@ -39,17 +39,17 @@ impl StudioThemeMode {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::GraphiteDark => "Graphite Dark",
-            Self::WarmPaper => "Warm Paper",
-            Self::CarbonObsidian => "Carbon Obsidian",
+            Self::GraphiteDark => "Gruvbox Dark",
+            Self::WarmPaper => "Gruvbox Light",
+            Self::CarbonObsidian => "Gruvbox Soft",
         }
     }
 
     pub const fn short_label(self) -> &'static str {
         match self {
-            Self::GraphiteDark => "Graphite",
-            Self::WarmPaper => "Paper",
-            Self::CarbonObsidian => "Obsidian",
+            Self::GraphiteDark => "Dark",
+            Self::WarmPaper => "Light",
+            Self::CarbonObsidian => "Soft",
         }
     }
 
@@ -87,21 +87,21 @@ impl AccentPreset {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::KineMint => "Kine Mint",
-            Self::CinemaAmber => "Cinema Amber",
-            Self::BroadcastCyan => "Broadcast Cyan",
-            Self::StudioViolet => "Studio Violet",
-            Self::SignalCrimson => "Signal Crimson",
+            Self::KineMint => "Gruvbox Green",
+            Self::CinemaAmber => "Gruvbox Yellow",
+            Self::BroadcastCyan => "Gruvbox Aqua",
+            Self::StudioViolet => "Gruvbox Purple",
+            Self::SignalCrimson => "Gruvbox Red",
         }
     }
 
     pub const fn hex_preview(self) -> &'static str {
         match self {
-            Self::KineMint => "#3de4a8",
-            Self::CinemaAmber => "#f5a623",
-            Self::BroadcastCyan => "#00e3ff",
-            Self::StudioViolet => "#9b72f2",
-            Self::SignalCrimson => "#ff6b6b",
+            Self::KineMint => "#a9b665",
+            Self::CinemaAmber => "#d8a657",
+            Self::BroadcastCyan => "#89b482",
+            Self::StudioViolet => "#d3869b",
+            Self::SignalCrimson => "#ea6962",
         }
     }
 }

@@ -39,6 +39,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install latest FFmpeg with libvvenc
+        run: |
+          ./scripts/install-ffmpeg.sh
+          echo "KINE_FFMPEG=$GITHUB_WORKSPACE/.tools/ffmpeg/bin/ffmpeg" >> "$GITHUB_ENV"
+
       - name: Install NASM (optional, for --features asm)
         if: inputs.enable_asm == 'true'
         run: |

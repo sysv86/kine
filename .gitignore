@@ -4,3 +4,5 @@
 *.log
 CONCEPT.md
 .kine-studio-bridge.json
+
+.tools/

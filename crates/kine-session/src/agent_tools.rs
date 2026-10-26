@@ -768,7 +768,7 @@ pub fn studio_add_node(state: &mut StudioState, args: &Value) -> AgentToolResult
         if let Some(fill) = args.get("fill").and_then(Value::as_str) {
             def.fill = Some(fill.to_string());
         } else if matches!(kind.as_str(), "rect" | "circle") {
-            def.fill = Some("#3de4a8".to_string());
+            def.fill = Some("#a9b665".to_string());
         }
 
         if let Some(color) = args.get("color").and_then(Value::as_str) {
@@ -2496,7 +2496,7 @@ pub fn build_element_agent_prompt(
          External CLI Agent Bridge Commands:\n\
          - kine agent status | selection | look | tree | timeline | inspect --node {nid}\n\
          - kine agent set-text --node {nid} --text \"...\"\n\
-         - kine agent set-style --node {nid} --fill \"#3de4a8\" --opacity 0.9\n\
+         - kine agent set-style --node {nid} --fill \"#a9b665\" --opacity 0.9\n\
          - kine agent transform --node {nid} --x {rx:.0} --y {ry:.0} --width {rw:.0} --height {rh:.0}\n\
          - kine agent animate --node {nid} --prop opacity --from 0 --to 1 --start 0 --end 1.2 --easing easeOut\n\
          - kine agent keyframe --node {nid} --prop translateX --time {t:.2} --value 40\n\

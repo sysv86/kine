@@ -417,10 +417,14 @@ fn a_scene_without_audio_writes_no_audio_track() {
 
 #[test]
 fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
+    if !kine_server::VideoEncoder::H266Ffmpeg.is_available() {
+        eprintln!("skipping H.266 test: FFmpeg with libvvenc is not available");
+        return;
+    }
     let (mut engine, handle) = engine_with(&animated_scene_json());
 
     let mp4_opts = VideoOptions {
-        encoder: VideoEncoder::H266Software,
+        encoder: VideoEncoder::H266Ffmpeg,
         container: VideoContainer::Mp4,
         frames: 8,
         fps_num: 24,
@@ -431,11 +435,11 @@ fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
         ..Default::default()
     };
     let mp4_report = kine_server::render_video(&mut engine, handle, &mp4_opts).expect("h266 mp4");
-    assert_eq!(mp4_report.encoder, VideoEncoder::H266Software);
+    assert_eq!(mp4_report.encoder, VideoEncoder::H266Ffmpeg);
     assert_eq!(mp4_report.frames, 8);
     assert_eq!(mp4_report.samples, 8);
-    // The H.266 encoder is intra-only: every access unit is an IDR_N_LP, so
-    // every sample is a sync sample (`keyframe_interval` is not honoured).
+    // The FFmpeg/libvvenc path is configured all-intra (`IntraPeriod=1`), so
+    // every sample is a keyframe/sync sample.
     assert_eq!(mp4_report.keyframes, 8);
     assert!(has(&mp4_report.bytes, b"ftyp"));
     assert!(has(&mp4_report.bytes, b"vvc1"), "missing vvc1 sample entry");
@@ -444,7 +448,7 @@ fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
     assert!(has(&mp4_report.bytes, b"moov"));
 
     let mkv_opts = VideoOptions {
-        encoder: VideoEncoder::H266Software,
+        encoder: VideoEncoder::H266Ffmpeg,
         container: VideoContainer::Mkv,
         frames: 6,
         fps_num: 24,

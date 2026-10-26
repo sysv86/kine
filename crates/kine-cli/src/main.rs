@@ -35,6 +35,7 @@ USAGE:
                   [--format mp4|mkv|webm|y4m|gif|kvid|rgba|i420|nv12|png|qoi|bmp|ppm|pam|tga]
                   [--seq] [--frame N] [--frames N] [--fps 30] [--quality Q] [--speed 0-10]
                   [--encoder av1|h266|vvc|h264-hw|h264-zero-copy] [--bitrate BPS]
+                  # h266/vvc requires an FFmpeg build with libvvenc (scripts/install-ffmpeg.sh)
                   [--backend auto|gpu|cpu]
   kine strip      --scene <scene> --out <strip.png> [--frames 6] [--fps 30]
   kine onion      --scene <scene> --out <onion.png> [--frames 6] [--fps 30]
@@ -532,7 +533,7 @@ fn main() -> ExitCode {
                 match requested.to_ascii_lowercase().as_str() {
                     "av1" | "software" => opts.encoder = VideoEncoder::Av1Software,
                     "h266" | "vvc" | "h266-sw" | "vvc-sw" => {
-                        opts.encoder = VideoEncoder::H266Software
+                        opts.encoder = VideoEncoder::H266Ffmpeg
                     }
                     #[cfg(feature = "hwencode")]
                     "h264-hw" | "hardware" | "h264" => opts.encoder = VideoEncoder::H264Hardware,
@@ -1046,9 +1047,9 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     }
     let color_ms = t2.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_color);
 
-    // 4. H.266 / VVC software encode + MP4 (vvc1/vvcC) mux (12 frames)
+    // 4. H.266 / VVC encode through FFmpeg/libvvenc + MP4 (vvc1/vvcC) mux (12 frames)
     let mut vvc_opts = VideoOptions::default();
-    vvc_opts.encoder = VideoEncoder::H266Software;
+    vvc_opts.encoder = VideoEncoder::H266Ffmpeg;
     vvc_opts.container = VideoContainer::Mp4;
     vvc_opts.frames = 12;
     vvc_opts.fps_num = 30;
@@ -1056,14 +1057,22 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     vvc_opts.speed = 9;
     let t3 = Instant::now();
     let vvc_report = match kine_server::render_video(engine, handle, &vvc_opts) {
-        Ok(r) => r,
+        Ok(r) => Some(r),
         Err(e) => {
-            eprintln!("bench h266 error: {e}");
-            return ExitCode::FAILURE;
+            eprintln!("bench h266 unavailable: {e}");
+            None
         }
     };
     let vvc_total_ms = t3.elapsed().as_secs_f64() * 1000.0;
     let vvc_fps = (vvc_opts.frames as f64) / (vvc_total_ms / 1000.0).max(1e-6);
+    let (vvc_latency, vvc_throughput, vvc_size) = match &vvc_report {
+        Some(report) => (
+            format!("`{:.2} ms/frame`", vvc_total_ms / (vvc_opts.frames as f64)),
+            format!("`{vvc_fps:.1} fps`"),
+            format!("`{} B`", report.bytes.len()),
+        ),
+        None => ("`n/a`".to_string(), "`n/a`".to_string(), "`n/a`".to_string()),
+    };
 
     // 5. AV1 (rav1e) software encode + MP4 (av01) mux (12 frames)
     let mut av1_opts = VideoOptions::default();
@@ -1097,15 +1106,20 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
 
     let doc = engine.doctor();
     let md_table = format!(
-        "| Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |\n         | :--- | :--- | ---: | ---: | ---: | :--- |\n         | **Scene Parse + Static Inspect** | 1280×720 AST | `{load_ms:.2} ms/op` | `{:.1} ops/s` | — | `{}` (`{}`) |\n         | **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `{raster_ms:.2} ms/frame` | `{:.1} fps` | `3,686,400 B` | `{}` |\n         | **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `{color_ms:.2} ms/frame` | `{:.1} fps` | `1,382,400 B` | `16-bit int + MT` |\n         | **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | `{:.2} ms/frame` | `{vvc_fps:.1} fps` | `{} B` | `software VVC` |\n         | **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `{:.2} ms/frame` | `{av1_fps:.1} fps` | `{} B` | `rav1e (asm={})` |\n         | **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `{bridge_ms:.2} ms/call` | `{:.1} calls/s` | — | `in-process` |",
+        "| Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |\n\
+         | :--- | :--- | ---: | ---: | ---: | :--- |\n\
+         | **Scene Parse + Static Inspect** | 1280×720 AST | `{load_ms:.2} ms/op` | `{:.1} ops/s` | — | `{}` (`{}`) |\n\
+         | **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `{raster_ms:.2} ms/frame` | `{:.1} fps` | `3,686,400 B` | `{}` |\n\
+         | **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `{color_ms:.2} ms/frame` | `{:.1} fps` | `1,382,400 B` | `16-bit int + MT` |\n\
+         | **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | {vvc_latency} | {vvc_throughput} | {vvc_size} | `ffmpeg libvvenc` |\n\
+         | **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `{:.2} ms/frame` | `{av1_fps:.1} fps` | `{} B` | `rav1e (asm={})` |\n\
+         | **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `{bridge_ms:.2} ms/call` | `{:.1} calls/s` | — | `in-process` |",
         1000.0 / load_ms.max(1e-6),
         doc.platform,
         std::env::consts::ARCH,
         1000.0 / raster_ms.max(1e-6),
         doc.renderer,
         1000.0 / color_ms.max(1e-6),
-        vvc_total_ms / (vvc_opts.frames as f64),
-        vvc_report.bytes.len(),
         av1_total_ms / (av1_opts.frames as f64),
         av1_report.bytes.len(),
         doc.rav1e_asm_enabled,
@@ -1155,8 +1169,8 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
             "scene_parse_inspect_ms": load_ms,
             "cpu_raster_1280x720_ms": raster_ms,
             "bt709_rgba_to_i420_ms": color_ms,
-            "h266_vvc_mp4_fps": vvc_fps,
-            "h266_vvc_mp4_bytes": vvc_report.bytes.len(),
+            "h266_vvc_mp4_fps": vvc_report.as_ref().map(|_| vvc_fps),
+            "h266_vvc_mp4_bytes": vvc_report.as_ref().map(|r| r.bytes.len()),
             "av1_mp4_fps": av1_fps,
             "av1_mp4_bytes": av1_report.bytes.len(),
             "session_agent_status_ms": bridge_ms,

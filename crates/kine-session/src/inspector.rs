@@ -1,7 +1,6 @@
 //! Design / Property Inspector & Layers Tree operations for Kine Studio.
 //!
-//! Mirrors Hyperframes Studio's `PropertyPanel.tsx`, `PropertyFieldRow.tsx`, and
-//! `LayersPanel.tsx`: layout geometry (`X`, `Y`, `W`, `H`), 2D transforms,
+//! Implements the Kine Studio property inspector, property rows, and layers tree: layout geometry (`X`, `Y`, `W`, `H`), 2D transforms,
 //! appearance (fill, stroke, shadow, corner radius), typography, WGSL shader
 //! uniform reflection, keyframe & easing controls, and Z-ordered layer tree
 //! management with collapsible cascading hierarchy.
@@ -521,7 +520,7 @@ impl StudioState {
                 let next = (def.stroke_width.unwrap_or(0.0) + dw).clamp(0.0, 48.0);
                 def.stroke_width = Some(next);
                 if next > 0.0 && def.stroke_color.is_none() {
-                    def.stroke_color = Some("#3de4a8".to_string());
+                    def.stroke_color = Some("#a9b665".to_string());
                 }
             }
             Ok(())

@@ -1,5 +1,5 @@
-//! Software video encoding (AV1 via `rav1e` and H.266 / VVC), decoding, and
-//! uncompressed/lossless stream formats.
+//! Video encoding (AV1 via `rav1e`, H.266/VVC via an external FFmpeg with
+//! `libvvenc`), decoding, and uncompressed/lossless stream formats.
 //!
 //! Colour handling is **BT.709 limited range** for 8-bit SDR, with the matrix
 //! applied explicitly using integer fixed-point arithmetic rather than assumed
@@ -7,19 +7,15 @@
 
 pub mod av1;
 pub mod color;
+pub mod ffmpeg;
 pub mod raw;
-pub mod vvc;
 pub mod y4m;
 
 pub use av1::{Av1Encoder, EncoderSettings};
-pub use color::{
-    i420_to_rgba, i444_to_rgba, nv12_to_rgba, rgba_to_i420, rgba_to_nv12, I420Frame,
-};
+pub use color::{i420_to_rgba, i444_to_rgba, nv12_to_rgba, rgba_to_i420, rgba_to_nv12, I420Frame};
+pub use ffmpeg::{ffmpeg_vvc_available, ffmpeg_vvc_path, ffmpeg_vvc_version, FfmpegVvcEncoder};
 pub use raw::{
     decode_kvid, decode_raw_stream, encode_kvid, encode_raw_frame, KvidVideo, RawPixelFormat,
-};
-pub use vvc::{
-    decode_vvc_annexb_to_i420, parse_vvc_annexb_nals, VvcEncoder, VvcNalType, VvcNalUnit,
 };
 pub use y4m::{decode_y4m, Y4mEncoder, Y4mVideo};
 

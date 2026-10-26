@@ -1,7 +1,7 @@
 //! NLE Timeline & Node Track model and editing operations for Kine Studio.
 //!
-//! Mirrors Hyperframes Studio's `TimelinePane`, `TimelineToolbar`, and
-//! `Timeline.tsx`: time ruler tick generation, multi-track node/audio lanes,
+//! Implements the Kine Studio `TimelinePane`, `TimelineToolbar`, and
+//! `Timeline` model: time ruler tick generation, multi-track node/audio lanes,
 //! keyframe diamonds, playhead scrubbing, clip/keyframe splitting, time
 //! shifting, ripple edit, and keyframe navigation.
 

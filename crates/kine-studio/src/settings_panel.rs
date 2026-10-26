@@ -1,8 +1,8 @@
 //! Dedicated Settings Window & Modal Overlay (`settings_panel.rs`) for Kine Studio.
 //!
 //! Provides a 5-category tabbed configuration interface:
-//! 1. `Appearance & UI`: Surface theme (`Graphite Dark`, `Warm Paper`, `Carbon Obsidian`),
-//!    Signal Accent preset (`Kine Mint`, `Cinema Amber`, `Broadcast Cyan`, `Studio Violet`, `Signal Crimson`),
+//! 1. `Appearance & UI`: Surface theme (`Gruvbox Dark`, `Gruvbox Light`, `Gruvbox Soft`),
+//!    Signal Accent preset (`Gruvbox Green`, `Gruvbox Yellow`, `Gruvbox Aqua`, `Gruvbox Purple`, `Gruvbox Red`),
 //!    UI Density (`Compact`, `Comfortable`, `Spacious`), UI Animation speed, Reduced Motion,
 //!    Cascade Guide Lines, Left/Right Dock visibility, and Status Bar visibility.
 //! 2. `Editor & Viewport`: Active canvas dimensions (`640×360`, `1280×720`, `1920×1080`, `1080×1080`, `1080×1920`),
@@ -516,7 +516,7 @@ fn editor_viewport_tab(state: &mut StudioState, t: &StudioPalette) -> Boxed {
                     .flex(1.0)
                     .into_any_flex(),
                     setting_toggle(
-                        "Topology Lens (Mint Ring)",
+                        "Topology Lens (Green Ring)",
                         state.topology_lens_active,
                         t,
                         |st: &mut StudioState| {

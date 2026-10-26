@@ -1,6 +1,7 @@
 //! ISO/IEC 14496-15 Section 11 H.266 / VVC (`vvc1` / `vvcC`) packetizer and
 //! ISO-BMFF `.mp4` muxer backend.
 
+use crate::vvc_ps::{BitWriter, parse_sps_info, select_level_idc};
 use crate::{frame_duration, AudioSpec, MuxError, VIDEO_TIMESCALE};
 use std::io::Write;
 
@@ -88,14 +89,11 @@ pub fn annexb_to_vvcc_packets(data: &[u8]) -> (VvcParamSets, Vec<u8>) {
 /// The profile/tier/level/chroma/bit-depth values and the constraint bits are
 /// read from the SPS itself rather than guessed from an arbitrary byte offset.
 pub fn build_vvcc_record(params: &VvcParamSets, width: u32, height: u32) -> Vec<u8> {
-    use kine_encode::vvc::bits::BitWriter;
-    use kine_encode::vvc::{hls::select_level_idc, parse_vvc_sps_info};
-
     // `VvcParamSets` stores complete NAL units (2-byte VVC header + RBSP).
     let info = params
         .sps
         .as_deref()
-        .and_then(|nal| parse_vvc_sps_info(nal.get(2..)?))
+        .and_then(|nal| parse_sps_info(nal.get(2..)?))
         .filter(|info| info.sps_id == 0);
 
     let (profile_idc, tier_flag, level_idc, frame_only, multilayer, chroma_format_idc) = match &info

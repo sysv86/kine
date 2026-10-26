@@ -7,7 +7,8 @@ use kine_audio::{
     AudioClip, AudioTrackSpec, BiquadFilterSpec, CompressorSpec, FadeCurve,
 };
 use kine_encode::{
-    encode_kvid, encode_raw_frame, Av1Encoder, EncoderSettings, RawPixelFormat, VvcEncoder, Y4mEncoder,
+    encode_kvid, encode_raw_frame, Av1Encoder, EncoderSettings, FfmpegVvcEncoder, RawPixelFormat,
+    Y4mEncoder,
 };
 use kine_mux::{AudioSpec, EbmlDocType, MkvMuxer, Muxer};
 use kine_render::{encode_animated_gif, pixmap_to_straight_rgba};
@@ -83,8 +84,8 @@ impl VideoContainer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoEncoder {
     Av1Software,
-    /// Software H.266 / VVC (ITU-T H.266 | ISO/IEC 23090-3) encoder.
-    H266Software,
+    /// H.266 / VVC encoder delegated to FFmpeg with `libvvenc`.
+    H266Ffmpeg,
     #[cfg(feature = "hwencode")]
     H264Hardware,
     #[cfg(feature = "zero-copy")]
@@ -95,7 +96,7 @@ impl VideoEncoder {
     pub fn name(self) -> &'static str {
         match self {
             Self::Av1Software => "av1 (rav1e, software)",
-            Self::H266Software => "h266 / vvc (software)",
+            Self::H266Ffmpeg => "h266 / vvc (ffmpeg libvvenc)",
             #[cfg(feature = "hwencode")]
             Self::H264Hardware => "h264 (hardware, NV12 upload)",
             #[cfg(feature = "zero-copy")]
@@ -105,7 +106,8 @@ impl VideoEncoder {
 
     pub fn is_available(self) -> bool {
         match self {
-            Self::Av1Software | Self::H266Software => true,
+            Self::Av1Software => true,
+            Self::H266Ffmpeg => kine_encode::ffmpeg_vvc_available(),
             #[cfg(feature = "hwencode")]
             Self::H264Hardware => {
                 matches!(kine_mux::hwencode::h264_encoder_available(), Ok(true))
@@ -482,7 +484,7 @@ pub fn render_video(
         return render_video_zero_copy(engine, handle, opts, width, height);
     }
 
-    if opts.encoder == VideoEncoder::H266Software && opts.container == VideoContainer::Webm {
+    if opts.encoder == VideoEncoder::H266Ffmpeg && opts.container == VideoContainer::Webm {
         return Err(EngineError::Video(
             "WebM container only supports AV1/VP9 video; use .mp4 or .mkv for H.266/VVC".into(),
         ));
@@ -493,7 +495,7 @@ pub fn render_video(
     settings.speed = opts.speed;
     settings.keyframe_interval = opts.keyframe_interval;
 
-    let mux_codec = if opts.encoder == VideoEncoder::H266Software {
+    let mux_codec = if opts.encoder == VideoEncoder::H266Ffmpeg {
         kine_mux::Codec::H266
     } else {
         kine_mux::Codec::Av1
@@ -515,8 +517,9 @@ pub fn render_video(
     let mut distinct = 0u64;
     let mut previous: Option<Vec<u8>> = None;
 
-    if opts.encoder == VideoEncoder::H266Software {
-        let mut encoder = VvcEncoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
+    if opts.encoder == VideoEncoder::H266Ffmpeg {
+        let mut encoder =
+            FfmpegVvcEncoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
         for frame in 0..opts.frames {
             let time = opts.frame_time(frame);
             let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
@@ -527,21 +530,14 @@ pub fn render_video(
                 previous = Some(rgba.to_vec());
             }
 
-            let out = encoder
+            encoder
                 .encode_rgba(rgba)
                 .map_err(|e| EngineError::Video(e.to_string()))?;
-            for unit in out.units {
-                if unit.keyframe {
-                    keyframes += 1;
-                }
-                sink.push_video(samples, &unit.data, unit.keyframe)?;
-                samples += 1;
-            }
         }
-        let tail = encoder
+        let units = encoder
             .finish()
             .map_err(|e| EngineError::Video(e.to_string()))?;
-        for unit in tail.units {
+        for unit in units {
             if unit.keyframe {
                 keyframes += 1;
             }
@@ -591,8 +587,8 @@ pub fn render_video(
 
     Ok(VideoReport {
         bytes,
-        encoder: if opts.encoder == VideoEncoder::H266Software {
-            VideoEncoder::H266Software
+        encoder: if opts.encoder == VideoEncoder::H266Ffmpeg {
+            VideoEncoder::H266Ffmpeg
         } else {
             VideoEncoder::Av1Software
         },

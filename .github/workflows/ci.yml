@@ -35,6 +35,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install latest FFmpeg with libvvenc (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./scripts/install-ffmpeg.sh
+          echo "KINE_FFMPEG=$GITHUB_WORKSPACE/.tools/ffmpeg/bin/ffmpeg" >> "$GITHUB_ENV"
+
       - name: Cache Cargo registry and target
         uses: Swatinem/rust-cache@v2
 
