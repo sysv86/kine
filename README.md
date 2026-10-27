@@ -57,12 +57,12 @@ The benchmark table below is populated **only** when the manual **Benchmark (`wo
 <!-- BENCHMARK_TABLE_START -->
 | Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |
 | :--- | :--- | ---: | ---: | ---: | :--- |
-| **Scene Parse + Static Inspect** | 1280×720 AST | `2.93 ms/op` | `340.9 ops/s` | — | `linux` (`x86_64`) |
-| **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `12.54 ms/frame` | `79.8 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
-| **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `0.88 ms/frame` | `1134.0 fps` | `1,382,400 B` | `16-bit int + MT` |
-| **AV1 Encode + MP4 (`av01`)** | 1280×720 · 12f | `13.27 ms/frame` | `75.4 fps` | `8770 B` | `ffmpeg libsvtav1` |
-| **H.264 Encode + MP4 (`avc1`)** | 1280×720 · 12f | `5.48 ms/frame` | `182.6 fps` | `18902 B` | `ffmpeg libopenh264` |
-| **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.01 ms/call` | `67070.4 calls/s` | — | `in-process` |
+| **Scene Parse + Static Inspect** | 1280×720 AST | `0.14 ms/op` | `6922.7 ops/s` | — | `linux` (`x86_64`) |
+| **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `2.34 ms/frame` | `426.9 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
+| **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `2.56 ms/frame` | `390.7 fps` | `1,382,400 B` | `16-bit int + MT` |
+| **AV1 Encode + MP4 (`av01`)** | 1280×720 · 12f | `16.97 ms/frame` | `58.9 fps` | `8813 B` | `ffmpeg libsvtav1` |
+| **H.264 Encode + MP4 (`avc1`)** | 1280×720 · 12f | `7.36 ms/frame` | `135.8 fps` | `19193 B` | `ffmpeg libopenh264` |
+| **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.02 ms/call` | `47431.2 calls/s` | — | `in-process` |
 <!-- BENCHMARK_TABLE_END -->
 
 Both codec rows use the external FFmpeg build; if it is missing, the rows
