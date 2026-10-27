@@ -7,8 +7,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use kine_core::{NodeId, NodeKind, Scene};
 use kine_render::{
-    encode_pixmap, png, FrameFormat, FrameRenderer, RasterPixmap, RenderBackend,
-    RenderError,
+    encode_pixmap, png, FrameFormat, FrameRenderer, RasterPixmap, RenderBackend, RenderError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,14 +25,10 @@ pub struct DoctorReport {
     pub platform: &'static str,
     /// Host environment policy: Linux/macOS detection, graphics backend, output directory, notes.
     pub host: kine_platform::PlatformInfo,
-    /// Whether a hardware H.264 encoder is compiled in *and* usable here.
-    pub hw_encode_available: bool,
-    /// Whether the software AV1 encoder is available (it always is).
-    pub sw_encode_available: bool,
-    /// Whether FFmpeg with `libvvenc` was found for H.266 / VVC encoding.
-    pub h266_encode_available: bool,
-    /// Whether `rav1e` NASM/GAS assembly acceleration (`--features asm`) is enabled.
-    pub rav1e_asm_enabled: bool,
+    /// Whether the external FFmpeg has an AV1 encoder.
+    pub av1_encode_available: bool,
+    /// Whether the external FFmpeg has an H.264 encoder.
+    pub h264_encode_available: bool,
 }
 
 /// One static finding from `inspect`, produced without rasterizing.
@@ -156,7 +151,11 @@ impl Engine {
         self.renderer.shaper()
     }
 
-    pub fn preload_video_clip(&mut self, key: impl Into<String>, clip: kine_render::DecodedVideoClip) {
+    pub fn preload_video_clip(
+        &mut self,
+        key: impl Into<String>,
+        clip: kine_render::DecodedVideoClip,
+    ) {
         let key = key.into();
         self.renderer
             .video_cache_mut()
@@ -205,8 +204,8 @@ impl Engine {
                 .map_err(|e| EngineError::Definition(e.to_string()))?
         };
         let audio = def.audio.clone();
-        let mut scene = kine_script::scene_from_def(def)
-            .map_err(|e| EngineError::Definition(e.to_string()))?;
+        let mut scene =
+            kine_script::scene_from_def(def).map_err(|e| EngineError::Definition(e.to_string()))?;
         for node in scene.nodes.values_mut() {
             match &mut node.kind {
                 NodeKind::Image { src, .. } if !src.starts_with("pattern:") => {
@@ -275,8 +274,7 @@ impl Engine {
         handle: SceneHandle,
         frame: u64,
     ) -> Result<Vec<u8>, EngineError> {
-        let pixmap =
-            self.render_frame_at_with_index(handle, frame as f64 / 30.0, frame as u32)?;
+        let pixmap = self.render_frame_at_with_index(handle, frame as f64 / 30.0, frame as u32)?;
         Ok(png::pixmap_to_png(&pixmap)?)
     }
 
@@ -330,8 +328,8 @@ impl Engine {
                 let w = scene_ref.width as u16;
                 let h = scene_ref.height as u16;
                 if self.gpu_renderer.is_none() {
-                    let mut gpu = kine_render::gpu::GpuRenderer::new(w, h)
-                        .map_err(RenderError::Gpu)?;
+                    let mut gpu =
+                        kine_render::gpu::GpuRenderer::new(w, h).map_err(RenderError::Gpu)?;
                     gpu.sync_fonts_from(self.renderer.shaper());
                     // Clips decoded (or preloaded) before the GPU renderer
                     // existed must stay visible to it.
@@ -351,7 +349,9 @@ impl Engine {
         }
 
         let scene_ref = &self.scenes[&handle];
-        Ok(self.renderer.render_at(scene_ref, time as f32, frame_index)?)
+        Ok(self
+            .renderer
+            .render_at(scene_ref, time as f32, frame_index)?)
     }
 
     /// Render a horizontal contact sheet (`strip`) of `count` frames.
@@ -376,8 +376,8 @@ impl Engine {
             let x_off = (i as usize) * (w as usize);
             for y in 0..usize::from(h) {
                 let src_row = &frame_px.data()[y * usize::from(w)..(y + 1) * usize::from(w)];
-                let dst_row = &mut sheet.data_mut()
-                    [y * usize::from(total_w) + x_off..y * usize::from(total_w) + x_off + usize::from(w)];
+                let dst_row = &mut sheet.data_mut()[y * usize::from(total_w) + x_off
+                    ..y * usize::from(total_w) + x_off + usize::from(w)];
                 dst_row.copy_from_slice(src_row);
             }
         }
@@ -511,10 +511,7 @@ impl Engine {
                         }
                     }
                     Err(e) => {
-                        let where_ = e
-                            .line()
-                            .map(|l| format!("line {l}: "))
-                            .unwrap_or_default();
+                        let where_ = e.line().map(|l| format!("line {l}: ")).unwrap_or_default();
                         findings.push(Finding {
                             severity: FindingSeverity::Error,
                             code: "shader-error".into(),
@@ -744,21 +741,8 @@ impl Engine {
                 .collect(),
             platform: std::env::consts::OS,
             host,
-            hw_encode_available: self.hw_encode_available(),
-            sw_encode_available: true,
-            h266_encode_available: kine_encode::ffmpeg_vvc_available(),
-            rav1e_asm_enabled: cfg!(feature = "asm"),
-        }
-    }
-
-    pub fn hw_encode_available(&self) -> bool {
-        #[cfg(feature = "hwencode")]
-        {
-            matches!(kine_mux::hwencode::h264_encoder_available(), Ok(true))
-        }
-        #[cfg(not(feature = "hwencode"))]
-        {
-            false
+            av1_encode_available: kine_encode::ffmpeg_available(kine_encode::FfmpegCodec::Av1),
+            h264_encode_available: kine_encode::ffmpeg_available(kine_encode::FfmpegCodec::H264),
         }
     }
 }
@@ -813,7 +797,10 @@ mod tests {
     fn renders_png_qoi_bmp_via_engine() {
         let (mut engine, handle) = engine_with_scene();
         let png_bytes = engine.render_frame_png(handle, 0).unwrap();
-        assert_eq!(&png_bytes[..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(
+            &png_bytes[..8],
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+        );
 
         let qoi_bytes = engine
             .render_frame_format(handle, 0, FrameFormat::Qoi)
@@ -844,7 +831,11 @@ mod tests {
     fn inspect_reports_clean_scene() {
         let (mut engine, handle) = engine_with_scene();
         let report = engine.inspect(handle).unwrap();
-        assert!(!report.has_errors(), "unexpected errors: {:?}", report.findings);
+        assert!(
+            !report.has_errors(),
+            "unexpected errors: {:?}",
+            report.findings
+        );
     }
 
     #[test]
@@ -860,9 +851,7 @@ mod tests {
     fn snapshot_diff_passes_against_itself() {
         let (mut engine, handle) = engine_with_scene();
         let golden = engine.render_frame_png(handle, 0).unwrap();
-        let report = engine
-            .snapshot_diff(handle, 0, &golden, 0.001)
-            .unwrap();
+        let report = engine.snapshot_diff(handle, 0, &golden, 0.001).unwrap();
         assert!(!report.width_mismatch);
         assert_eq!(report.differing_pixels, 0, "self-diff should be empty");
         assert!(report.passed);
@@ -919,7 +908,11 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             .iter()
             .find(|f| f.code == "shader-diagnostic")
             .expect("diagnostic excerpt");
-        assert!(diagnostic.message.contains("p.b"), "got: {}", diagnostic.message);
+        assert!(
+            diagnostic.message.contains("p.b"),
+            "got: {}",
+            diagnostic.message
+        );
     }
 
     #[test]
@@ -959,7 +952,11 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         let handle = insert(&mut engine, scene_with_shader(wgsl, "{}"));
 
         let report = engine.inspect(handle).unwrap();
-        assert!(!report.has_errors(), "expected no errors: {:?}", report.findings);
+        assert!(
+            !report.has_errors(),
+            "expected no errors: {:?}",
+            report.findings
+        );
         if !kine_render::gpu_adapter_present() {
             assert!(
                 report.findings.iter().any(|f| f.code == "shader-needs-gpu"),

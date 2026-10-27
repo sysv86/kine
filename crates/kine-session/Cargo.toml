@@ -30,5 +30,3 @@ taffy.workspace = true
 [features]
 default = []
 gpu = ["kine-server/gpu"]
-hwencode = ["kine-server/hwencode"]
-zero-copy = ["kine-server/zero-copy"]

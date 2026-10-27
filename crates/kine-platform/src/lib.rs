@@ -3,16 +3,14 @@
 //! Kine targets **Linux** (`x86_64`, `aarch64`), **Windows** (`x86_64`,
 //! `aarch64`), and **macOS** (`aarch64` Apple Silicon, `x86_64`). All core
 //! subsystems — scene layout (`taffy`), text shaping (`cosmic-text`), CPU
-//! rasterization (`vello_cpu`), CPU WGSL shader VM (`naga`), software AV1
-//! encoding (`rav1e`), audio synthesis/DSP/mixing (`symphonia`, `rubato`,
-//! `flacenc`, `hound`), container muxing (`muxfin`, `mkv`), and the Xilem UI
-//! (`kine-studio`) — execute deterministically across all three operating
-//! systems without OS-specific divergence.
+//! rasterization (`vello_cpu`), CPU WGSL shader VM (`naga`), audio
+//! synthesis/DSP/mixing (`symphonia`, `rubato`, `flacenc`, `hound`), container
+//! muxing (`muxfin`, `mkv`), and the Xilem UI (`kine-studio`) — execute
+//! deterministically across all three operating systems without OS-specific
+//! divergence. AV1 and H.264 encoding run in an external FFmpeg process.
 //!
 //! Optional GPU acceleration uses `wgpu` + `vello_gpu` (Vulkan on Linux,
-//! DirectX 12 / Vulkan on Windows, Metal on macOS), and optional hardware H.264
-//! encoding uses `gpu-video` (Vulkan Video on Linux/Windows, VideoToolbox on
-//! macOS).
+//! DirectX 12 / Vulkan on Windows, Metal on macOS).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -52,15 +50,6 @@ impl PlatformKind {
             Self::Other => "wgpu",
         }
     }
-
-    /// Hardware video encode backend expected on this OS when compiled with `hwencode`.
-    pub const fn hw_video_backend(self) -> &'static str {
-        match self {
-            Self::Linux | Self::Windows => "vulkan-video",
-            Self::MacOs => "videotoolbox",
-            Self::Other => "unavailable",
-        }
-    }
 }
 
 /// Raw, injectable observations about the host environment.
@@ -98,8 +87,7 @@ impl Facts {
         }
 
         let exists = |p: &str| Path::new(p).exists();
-        let linux_drm_device_present =
-            exists("/dev/dri/renderD128") || exists("/dev/dri/card0");
+        let linux_drm_device_present = exists("/dev/dri/renderD128") || exists("/dev/dri/card0");
 
         Self {
             os: std::env::consts::OS.to_string(),
@@ -127,8 +115,6 @@ pub struct PlatformInfo {
     pub kind: PlatformKind,
     /// Primary GPU backend on this platform (`"vulkan"`, `"dx12"`, `"metal"`, or `"wgpu"`).
     pub graphics_backend: &'static str,
-    /// Hardware video encode backend on this platform (`"vulkan-video"`, `"videotoolbox"`, or `"unavailable"`).
-    pub hw_video_backend: &'static str,
     /// Running inside an automated CI environment (`CI` or `GITHUB_ACTIONS` set).
     pub ci: bool,
     /// Where relative output paths resolve to (`KINE_OUTPUT_DIR`, or current working directory).
@@ -163,7 +149,6 @@ impl PlatformInfo {
         let ci = facts.is_ci();
         let output_dir = default_output_dir(facts);
         let graphics_backend = kind.graphics_backend();
-        let hw_video_backend = kind.hw_video_backend();
 
         let sw_gpu = facts
             .env
@@ -182,7 +167,7 @@ impl PlatformInfo {
             PlatformKind::Linux => {
                 if facts.linux_drm_device_present {
                     notes.push(
-                        "Linux host with DRM device (/dev/dri): Vulkan GPU rasterization and Vulkan Video encode supported when built with `--features gpu,hwencode`."
+                        "Linux host with DRM device (/dev/dri): Vulkan GPU rasterization supported when built with `--features gpu`."
                             .to_string(),
                     );
                 } else if vk_icd || sw_gpu {
@@ -199,13 +184,13 @@ impl PlatformInfo {
             }
             PlatformKind::Windows => {
                 notes.push(
-                    "Windows host: DirectX 12 / Vulkan GPU rasterization (`wgpu`) and Vulkan Video H.264 encode supported alongside the deterministic CPU pipeline."
+                    "Windows host: DirectX 12 / Vulkan GPU rasterization (`wgpu`) supported alongside the deterministic CPU pipeline."
                         .to_string(),
                 );
             }
             PlatformKind::MacOs => {
                 notes.push(
-                    "macOS host: Metal GPU rasterization (`wgpu`) and VideoToolbox H.264 hardware encode supported alongside the deterministic CPU pipeline."
+                    "macOS host: Metal GPU rasterization (`wgpu`) supported alongside the deterministic CPU pipeline."
                         .to_string(),
                 );
             }
@@ -222,7 +207,6 @@ impl PlatformInfo {
             arch: arch_str.to_string(),
             kind,
             graphics_backend,
-            hw_video_backend,
             ci,
             output_dir,
             gpu_expected,
@@ -312,7 +296,6 @@ mod tests {
         assert!(!info.kind.is_windows());
         assert!(!info.kind.is_macos());
         assert_eq!(info.graphics_backend, "vulkan");
-        assert_eq!(info.hw_video_backend, "vulkan-video");
         assert!(info.gpu_expected);
         assert!(!info.ci);
         assert_eq!(info.output_dir, PathBuf::from("/work/project"));
@@ -333,32 +316,26 @@ mod tests {
     }
 
     #[test]
-    fn windows_host_reports_dx12_and_vulkan_video() {
-        let facts = facts_for(
-            "windows",
-            "x86_64",
-            &[("USERPROFILE", "C:\\Users\\runner")],
-        );
+    fn windows_host_reports_dx12() {
+        let facts = facts_for("windows", "x86_64", &[("USERPROFILE", "C:\\Users\\runner")]);
         let info = PlatformInfo::from_facts(&facts);
         assert_eq!(info.kind, PlatformKind::Windows);
         assert!(info.kind.is_windows());
         assert!(!info.kind.is_linux());
         assert!(!info.kind.is_macos());
         assert_eq!(info.graphics_backend, "dx12");
-        assert_eq!(info.hw_video_backend, "vulkan-video");
         assert!(info.gpu_expected);
         assert!(info.notes.iter().any(|n| n.contains("DirectX 12")));
     }
 
     #[test]
-    fn macos_apple_silicon_reports_metal_and_videotoolbox() {
+    fn macos_apple_silicon_reports_metal() {
         let facts = facts_for("macos", "aarch64", &[("HOME", "/Users/runner")]);
         let info = PlatformInfo::from_facts(&facts);
         assert_eq!(info.kind, PlatformKind::MacOs);
         assert!(info.kind.is_macos());
         assert!(!info.kind.is_linux());
         assert_eq!(info.graphics_backend, "metal");
-        assert_eq!(info.hw_video_backend, "videotoolbox");
         assert!(info.gpu_expected);
         assert!(info.notes.iter().any(|n| n.contains("Metal")));
     }

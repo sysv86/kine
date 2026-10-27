@@ -698,7 +698,8 @@ impl StudioState {
         self.anim.smooth_playhead = 0.0;
         self.selected_node = Some(NodeId(0));
         self.sync_scene_to_engine()?;
-        self.file_watcher.watch(Some(path.to_path_buf()), Some(&base));
+        self.file_watcher
+            .watch(Some(path.to_path_buf()), Some(&base));
         self.notify_status(format!("Loaded scene {}", path.display()));
         Ok(())
     }
@@ -729,7 +730,8 @@ impl StudioState {
         self.selected_node = Some(NodeId(0));
         self.sync_scene_to_engine()?;
         let base = self.module_base();
-        self.file_watcher.watch(entry.source_path.clone(), Some(&base));
+        self.file_watcher
+            .watch(entry.source_path.clone(), Some(&base));
         self.notify_status(format!("Switched to composition: {}", entry.title));
         Ok(())
     }
@@ -1346,17 +1348,15 @@ impl StudioState {
         }
 
         let (container, encoder) = match fmt.as_str() {
-            "h266" | "vvc" | "mp4-h266" | "mp4-vvc" => {
-                (VideoContainer::Mp4, VideoEncoder::H266Ffmpeg)
-            }
-            "mkv-h266" | "mkv-vvc" => (VideoContainer::Mkv, VideoEncoder::H266Ffmpeg),
+            "h264" | "avc" | "mp4-h264" => (VideoContainer::Mp4, VideoEncoder::H264Ffmpeg),
+            "mkv-h264" => (VideoContainer::Mkv, VideoEncoder::H264Ffmpeg),
             other => {
                 let Some(c) = VideoContainer::from_extension(other) else {
                     return Err(StudioError::Message(format!(
                         "unsupported export format: {fmt}"
                     )));
                 };
-                (c, VideoEncoder::Av1Software)
+                (c, VideoEncoder::Av1Ffmpeg)
             }
         };
         let mut opts = VideoOptions::default();

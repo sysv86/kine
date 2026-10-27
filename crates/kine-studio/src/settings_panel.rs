@@ -860,7 +860,7 @@ fn engine_export_tab(state: &mut StudioState, t: &StudioPalette) -> Boxed {
         .into_any_flex(),
         setting_group_card(
             "AV1 Video Encoder Quality & Speed",
-            "Controls rav1e quantizer (lower = higher bitrate/fidelity) and speed preset (0 = slowest, 10 = fastest).",
+            "Controls the FFmpeg AV1 encoder quality (lower = higher bitrate/fidelity) and speed preset (0 = slowest, 10 = fastest).",
             flex_col(vec![
                 flex_row((
                     s_txt("AV1 Quantizer (Q)", 10.0, t.text_soft),

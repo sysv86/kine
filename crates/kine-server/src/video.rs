@@ -3,11 +3,9 @@
 //! `RGBA8`/`I420`/`NV12` streams), plus direct video-to-video transcoding.
 
 use crate::engine::{Engine, EngineError, SceneHandle};
-use kine_audio::{
-    AudioClip, AudioTrackSpec, BiquadFilterSpec, CompressorSpec, FadeCurve,
-};
+use kine_audio::{AudioClip, AudioTrackSpec, BiquadFilterSpec, CompressorSpec, FadeCurve};
 use kine_encode::{
-    encode_kvid, encode_raw_frame, Av1Encoder, EncoderSettings, FfmpegVvcEncoder, RawPixelFormat,
+    encode_kvid, encode_raw_frame, EncoderSettings, FfmpegCodec, FfmpegEncoder, RawPixelFormat,
     Y4mEncoder,
 };
 use kine_mux::{AudioSpec, EbmlDocType, MkvMuxer, Muxer};
@@ -81,43 +79,34 @@ impl VideoContainer {
 }
 
 /// Which encoder produces the video track.
+///
+/// Both codecs are encoded by an external FFmpeg process; Kine only renders,
+/// converts colour, and muxes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoEncoder {
-    Av1Software,
-    /// H.266 / VVC encoder delegated to FFmpeg with `libvvenc`.
-    H266Ffmpeg,
-    #[cfg(feature = "hwencode")]
-    H264Hardware,
-    #[cfg(feature = "zero-copy")]
-    H264ZeroCopy,
+    /// AV1 via FFmpeg (`libsvtav1` or `libaom-av1`).
+    Av1Ffmpeg,
+    /// H.264 / AVC via FFmpeg (`libopenh264`, or `libx264`).
+    H264Ffmpeg,
 }
 
 impl VideoEncoder {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Av1Software => "av1 (rav1e, software)",
-            Self::H266Ffmpeg => "h266 / vvc (ffmpeg libvvenc)",
-            #[cfg(feature = "hwencode")]
-            Self::H264Hardware => "h264 (hardware, NV12 upload)",
-            #[cfg(feature = "zero-copy")]
-            Self::H264ZeroCopy => "h264 (hardware, zero-copy GPU render)",
+            Self::Av1Ffmpeg => "av1 (ffmpeg)",
+            Self::H264Ffmpeg => "h264 (ffmpeg)",
+        }
+    }
+
+    pub fn codec(self) -> FfmpegCodec {
+        match self {
+            Self::Av1Ffmpeg => FfmpegCodec::Av1,
+            Self::H264Ffmpeg => FfmpegCodec::H264,
         }
     }
 
     pub fn is_available(self) -> bool {
-        match self {
-            Self::Av1Software => true,
-            Self::H266Ffmpeg => kine_encode::ffmpeg_vvc_available(),
-            #[cfg(feature = "hwencode")]
-            Self::H264Hardware => {
-                matches!(kine_mux::hwencode::h264_encoder_available(), Ok(true))
-            }
-            #[cfg(feature = "zero-copy")]
-            Self::H264ZeroCopy => {
-                kine_render::gpu_adapter_present()
-                    && matches!(kine_mux::hwencode::h264_encoder_available(), Ok(true))
-            }
-        }
+        kine_encode::ffmpeg_available(self.codec())
     }
 }
 
@@ -138,7 +127,7 @@ pub struct VideoOptions {
 impl Default for VideoOptions {
     fn default() -> Self {
         Self {
-            encoder: VideoEncoder::Av1Software,
+            encoder: VideoEncoder::Av1Ffmpeg,
             container: VideoContainer::Mp4,
             fps_num: 30,
             fps_den: 1,
@@ -273,8 +262,9 @@ pub fn mix_scene_audio(
         });
     }
 
-    let mut mixed: AudioClip = kine_audio::mix(&specs, total_seconds, def.sample_rate, def.channels)
-        .map_err(|e| EngineError::Video(format!("audio mix: {e}")))?;
+    let mut mixed: AudioClip =
+        kine_audio::mix(&specs, total_seconds, def.sample_rate, def.channels)
+            .map_err(|e| EngineError::Video(format!("audio mix: {e}")))?;
 
     if let Some(target_peak_db) = def.normalize_peak_db {
         mixed.normalize_peak(target_peak_db);
@@ -388,7 +378,14 @@ impl ContainerSink {
                         prepared.flac.channels,
                     )
                     .map_err(|e| EngineError::Video(e.to_string()))?,
-                    None => Muxer::new(Cursor::new(Vec::new()), codec, width, height, fps_num, fps_den),
+                    None => Muxer::new(
+                        Cursor::new(Vec::new()),
+                        codec,
+                        width,
+                        height,
+                        fps_num,
+                        fps_den,
+                    ),
                 };
                 Ok(Self::Mp4(muxer))
             }
@@ -419,7 +416,7 @@ impl ContainerSink {
     fn push_video(&mut self, frame: u64, data: &[u8], keyframe: bool) -> Result<(), EngineError> {
         match self {
             Self::Mp4(m) => m
-                .push_av1_obu(frame, data, keyframe)
+                .push_video_sample(frame, data, keyframe)
                 .map_err(|e| EngineError::Video(e.to_string())),
             Self::Mkv(m) => m
                 .push_video(frame, data, keyframe)
@@ -448,10 +445,14 @@ pub fn render_video(
     opts: &VideoOptions,
 ) -> Result<VideoReport, EngineError> {
     if opts.frames == 0 {
-        return Err(EngineError::Video("frame count must be greater than zero".into()));
+        return Err(EngineError::Video(
+            "frame count must be greater than zero".into(),
+        ));
     }
     if opts.fps_num == 0 || opts.fps_den == 0 {
-        return Err(EngineError::Video("frame rate must be greater than zero".into()));
+        return Err(EngineError::Video(
+            "frame rate must be greater than zero".into(),
+        ));
     }
 
     let (width, height) = {
@@ -475,18 +476,9 @@ pub fn render_video(
         VideoContainer::Mp4 | VideoContainer::Mkv | VideoContainer::Webm => {}
     }
 
-    #[cfg(feature = "hwencode")]
-    if opts.encoder == VideoEncoder::H264Hardware {
-        return render_video_h264_hardware(engine, handle, opts, width, height);
-    }
-    #[cfg(feature = "zero-copy")]
-    if opts.encoder == VideoEncoder::H264ZeroCopy {
-        return render_video_zero_copy(engine, handle, opts, width, height);
-    }
-
-    if opts.encoder == VideoEncoder::H266Ffmpeg && opts.container == VideoContainer::Webm {
+    if opts.encoder == VideoEncoder::H264Ffmpeg && opts.container == VideoContainer::Webm {
         return Err(EngineError::Video(
-            "WebM container only supports AV1/VP9 video; use .mp4 or .mkv for H.266/VVC".into(),
+            "WebM container only supports AV1/VP9 video; use .mp4 or .mkv for H.264".into(),
         ));
     }
 
@@ -494,11 +486,11 @@ pub fn render_video(
     settings.quantizer = opts.quantizer;
     settings.speed = opts.speed;
     settings.keyframe_interval = opts.keyframe_interval;
+    settings.bitrate = opts.bitrate;
 
-    let mux_codec = if opts.encoder == VideoEncoder::H266Ffmpeg {
-        kine_mux::Codec::H266
-    } else {
-        kine_mux::Codec::Av1
+    let mux_codec = match opts.encoder {
+        VideoEncoder::Av1Ffmpeg => kine_mux::Codec::Av1,
+        VideoEncoder::H264Ffmpeg => kine_mux::Codec::H264,
     };
 
     let audio = prepare_audio(engine, handle, opts.duration_seconds())?;
@@ -517,66 +509,31 @@ pub fn render_video(
     let mut distinct = 0u64;
     let mut previous: Option<Vec<u8>> = None;
 
-    if opts.encoder == VideoEncoder::H266Ffmpeg {
-        let mut encoder =
-            FfmpegVvcEncoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
-        for frame in 0..opts.frames {
-            let time = opts.frame_time(frame);
-            let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
-            let rgba = pixmap.data_as_u8_slice();
+    let mut encoder = FfmpegEncoder::new(settings, opts.encoder.codec())
+        .map_err(|e| EngineError::Video(e.to_string()))?;
+    for frame in 0..opts.frames {
+        let time = opts.frame_time(frame);
+        let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
+        let rgba = pixmap.data_as_u8_slice();
 
-            if previous.as_deref() != Some(rgba) {
-                distinct += 1;
-                previous = Some(rgba.to_vec());
-            }
-
-            encoder
-                .encode_rgba(rgba)
-                .map_err(|e| EngineError::Video(e.to_string()))?;
+        if previous.as_deref() != Some(rgba) {
+            distinct += 1;
+            previous = Some(rgba.to_vec());
         }
-        let units = encoder
-            .finish()
+
+        encoder
+            .encode_rgba(rgba)
             .map_err(|e| EngineError::Video(e.to_string()))?;
-        for unit in units {
-            if unit.keyframe {
-                keyframes += 1;
-            }
-            sink.push_video(samples, &unit.data, unit.keyframe)?;
-            samples += 1;
+    }
+    let units = encoder
+        .finish()
+        .map_err(|e| EngineError::Video(e.to_string()))?;
+    for unit in units {
+        if unit.keyframe {
+            keyframes += 1;
         }
-    } else {
-        let mut encoder = Av1Encoder::new(settings).map_err(|e| EngineError::Video(e.to_string()))?;
-        for frame in 0..opts.frames {
-            let time = opts.frame_time(frame);
-            let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
-            let rgba = pixmap.data_as_u8_slice();
-
-            if previous.as_deref() != Some(rgba) {
-                distinct += 1;
-                previous = Some(rgba.to_vec());
-            }
-
-            let out = encoder
-                .encode_rgba(rgba)
-                .map_err(|e| EngineError::Video(e.to_string()))?;
-            for unit in out.units {
-                if unit.keyframe {
-                    keyframes += 1;
-                }
-                sink.push_video(samples, &unit.data, unit.keyframe)?;
-                samples += 1;
-            }
-        }
-        let tail = encoder
-            .finish()
-            .map_err(|e| EngineError::Video(e.to_string()))?;
-        for unit in tail.units {
-            if unit.keyframe {
-                keyframes += 1;
-            }
-            sink.push_video(samples, &unit.data, unit.keyframe)?;
-            samples += 1;
-        }
+        sink.push_video(samples, &unit.data, unit.keyframe)?;
+        samples += 1;
     }
 
     if samples == 0 {
@@ -587,17 +544,10 @@ pub fn render_video(
 
     Ok(VideoReport {
         bytes,
-        encoder: if opts.encoder == VideoEncoder::H266Ffmpeg {
-            VideoEncoder::H266Ffmpeg
-        } else {
-            VideoEncoder::Av1Software
-        },
+        encoder: opts.encoder,
         container: opts.container,
         audio_frames,
-        audio_samples: audio
-            .as_ref()
-            .map(|a| a.flac.total_samples())
-            .unwrap_or(0),
+        audio_samples: audio.as_ref().map(|a| a.flac.total_samples()).unwrap_or(0),
         width,
         height,
         frames: opts.frames,
@@ -630,10 +580,12 @@ fn render_video_y4m(
         y4m.write_rgba(rgba)
             .map_err(|e| EngineError::Video(e.to_string()))?;
     }
-    let bytes = y4m.finish().map_err(|e| EngineError::Video(e.to_string()))?;
+    let bytes = y4m
+        .finish()
+        .map_err(|e| EngineError::Video(e.to_string()))?;
     Ok(VideoReport {
         bytes,
-        encoder: VideoEncoder::Av1Software,
+        encoder: VideoEncoder::Av1Ffmpeg,
         container: VideoContainer::Y4m,
         audio_frames: 0,
         audio_samples: 0,
@@ -667,11 +619,11 @@ fn render_video_gif(
         }
         frames_vec.push(pixmap);
     }
-    let bytes = encode_animated_gif(&frames_vec, opts.fps_num, opts.fps_den)
-        .map_err(EngineError::Video)?;
+    let bytes =
+        encode_animated_gif(&frames_vec, opts.fps_num, opts.fps_den).map_err(EngineError::Video)?;
     Ok(VideoReport {
         bytes,
-        encoder: VideoEncoder::Av1Software,
+        encoder: VideoEncoder::Av1Ffmpeg,
         container: VideoContainer::Gif,
         audio_frames: 0,
         audio_samples: 0,
@@ -709,7 +661,7 @@ fn render_video_kvid(
         .map_err(|e| EngineError::Video(e.to_string()))?;
     Ok(VideoReport {
         bytes,
-        encoder: VideoEncoder::Av1Software,
+        encoder: VideoEncoder::Av1Ffmpeg,
         container: VideoContainer::Kvid,
         audio_frames: 0,
         audio_samples: 0,
@@ -749,7 +701,7 @@ fn render_video_raw(
     }
     Ok(VideoReport {
         bytes,
-        encoder: VideoEncoder::Av1Software,
+        encoder: VideoEncoder::Av1Ffmpeg,
         container: opts.container,
         audio_frames: 0,
         audio_samples: 0,
@@ -796,215 +748,4 @@ pub fn transcode_video_clip(
     let handle = engine.insert_scene(scene);
     engine.preload_video_clip("in-memory://transcode", clip.clone());
     render_video(&mut engine, handle, opts)
-}
-
-#[cfg(feature = "hwencode")]
-fn render_video_h264_hardware(
-    engine: &mut Engine,
-    handle: SceneHandle,
-    opts: &VideoOptions,
-    width: u32,
-    height: u32,
-) -> Result<VideoReport, EngineError> {
-    use kine_mux::hwencode::{video_capable_device, HwEncodeConfig, HwH264Encoder};
-
-    let mut config = HwEncodeConfig::new(width, height, opts.fps_num, opts.fps_den);
-    config.keyframe_interval = opts.keyframe_interval;
-    if opts.bitrate != 0 {
-        config.bitrate = opts.bitrate;
-    }
-
-    let (device, _queue) =
-        video_capable_device().map_err(|e| EngineError::Video(e.to_string()))?;
-
-    let mut encoder =
-        HwH264Encoder::new(&device, config).map_err(|e| EngineError::Video(e.to_string()))?;
-
-    let audio = prepare_audio(engine, handle, opts.duration_seconds())?;
-    let mut sink = ContainerSink::new(
-        opts.container,
-        kine_mux::Codec::H264,
-        width,
-        height,
-        opts.fps_num,
-        opts.fps_den,
-        audio.as_ref(),
-    )?;
-    let audio_frames = sink.write_audio(audio.as_ref())?;
-
-    let mut samples = 0u64;
-    let mut keyframes = 0u64;
-    let mut distinct = 0u64;
-    let mut previous: Option<Vec<u8>> = None;
-
-    for frame in 0..opts.frames {
-        let time = opts.frame_time(frame);
-        let pixmap = engine.render_frame_at_with_index(handle, time, frame as u32)?;
-        let rgba = pixmap.data_as_u8_slice();
-
-        if previous.as_deref() != Some(rgba) {
-            distinct += 1;
-            previous = Some(rgba.to_vec());
-        }
-
-        let nv12 = kine_encode::rgba_to_nv12(rgba, width, height);
-        let chunks = encoder
-            .encode_nv12(&nv12, Some(frame), frame == 0)
-            .map_err(|e| EngineError::Video(e.to_string()))?;
-        for chunk in chunks {
-            if chunk.keyframe {
-                keyframes += 1;
-            }
-            sink.push_video(samples, &chunk.data, chunk.keyframe)?;
-            samples += 1;
-        }
-    }
-
-    for chunk in encoder
-        .flush()
-        .map_err(|e| EngineError::Video(e.to_string()))?
-    {
-        if chunk.keyframe {
-            keyframes += 1;
-        }
-        sink.push_video(samples, &chunk.data, chunk.keyframe)?;
-        samples += 1;
-    }
-
-    if samples == 0 {
-        return Err(EngineError::Video("encoder produced no samples".into()));
-    }
-
-    let bytes = sink.finalize()?;
-
-    Ok(VideoReport {
-        bytes,
-        encoder: VideoEncoder::H264Hardware,
-        container: opts.container,
-        audio_frames,
-        audio_samples: audio
-            .as_ref()
-            .map(|a| a.flac.total_samples())
-            .unwrap_or(0),
-        width,
-        height,
-        frames: opts.frames,
-        samples,
-        keyframes,
-        distinct_frames: distinct,
-    })
-}
-
-#[cfg(feature = "zero-copy")]
-fn render_video_zero_copy(
-    engine: &mut Engine,
-    handle: SceneHandle,
-    opts: &VideoOptions,
-    width: u32,
-    height: u32,
-) -> Result<VideoReport, EngineError> {
-    use kine_mux::hwencode::{
-        request_video_capable_device, HwEncodeConfig, HwH264TextureEncoder,
-    };
-    use kine_render::gpu::{GpuRenderer, Nv12Converter};
-
-    let mut config = HwEncodeConfig::new(width, height, opts.fps_num, opts.fps_den);
-    config.keyframe_interval = opts.keyframe_interval;
-    if opts.bitrate != 0 {
-        config.bitrate = opts.bitrate;
-    }
-
-    let adapter =
-        kine_render::gpu::request_adapter().map_err(|e| EngineError::Video(e.to_string()))?;
-    let (device, queue) = request_video_capable_device(
-        &adapter,
-        wgpu::Features::empty(),
-        wgpu::Limits::downlevel_defaults(),
-    )
-    .map_err(|e| EngineError::Video(e.to_string()))?;
-
-    let mut renderer =
-        GpuRenderer::from_device(device.clone(), queue.clone(), width as u16, height as u16)
-            .map_err(|e| EngineError::Video(e.to_string()))?;
-    renderer.sync_fonts_from(engine.shaper());
-
-    let converter = Nv12Converter::new(&device).map_err(|e| EngineError::Video(e.to_string()))?;
-    let mut encoder = HwH264TextureEncoder::new(&device, &queue, config)
-        .map_err(|e| EngineError::Video(e.to_string()))?;
-
-    let audio = prepare_audio(engine, handle, opts.duration_seconds())?;
-    let mut sink = ContainerSink::new(
-        opts.container,
-        kine_mux::Codec::H264,
-        width,
-        height,
-        opts.fps_num,
-        opts.fps_den,
-        audio.as_ref(),
-    )?;
-    let audio_frames = sink.write_audio(audio.as_ref())?;
-
-    let mut samples = 0u64;
-    let mut keyframes = 0u64;
-
-    for frame in 0..opts.frames {
-        let time = opts.frame_time(frame);
-        let rendered = {
-            let scene = engine.scene_at(handle, time)?;
-            renderer
-                .render_to_texture_at(scene, time as f32, frame as u32)
-                .map_err(|e| EngineError::Video(e.to_string()))?
-        };
-        let source = rendered.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let target = encoder
-            .begin_frame()
-            .map_err(|e| EngineError::Video(e.to_string()))?;
-        converter.convert(&device, &queue, &source, target);
-
-        let chunks = encoder
-            .submit_frame(Some(frame), frame == 0)
-            .map_err(|e| EngineError::Video(e.to_string()))?;
-        for chunk in chunks {
-            if chunk.keyframe {
-                keyframes += 1;
-            }
-            sink.push_video(samples, &chunk.data, chunk.keyframe)?;
-            samples += 1;
-        }
-    }
-
-    let tail = encoder
-        .flush()
-        .map_err(|e| EngineError::Video(e.to_string()))?;
-    for chunk in tail {
-        if chunk.keyframe {
-            keyframes += 1;
-        }
-        sink.push_video(samples, &chunk.data, chunk.keyframe)?;
-        samples += 1;
-    }
-
-    if samples == 0 {
-        return Err(EngineError::Video("encoder produced no samples".into()));
-    }
-
-    let bytes = sink.finalize()?;
-
-    Ok(VideoReport {
-        bytes,
-        encoder: VideoEncoder::H264ZeroCopy,
-        container: opts.container,
-        audio_frames,
-        audio_samples: audio
-            .as_ref()
-            .map(|a| a.flac.total_samples())
-            .unwrap_or(0),
-        width,
-        height,
-        frames: opts.frames,
-        samples,
-        keyframes,
-        distinct_frames: 0,
-    })
 }

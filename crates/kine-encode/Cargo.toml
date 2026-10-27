@@ -5,14 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-rav1e = { version = "0.8", default-features = false, features = ["threading"] }
 thiserror.workspace = true
 serde.workspace = true
-
-[features]
-default = []
-# Enable x86_64 NASM and AArch64 gas assembly kernels in rav1e for high-speed server builds.
-asm = ["rav1e/asm"]
 
 [dev-dependencies]
 image.workspace = true

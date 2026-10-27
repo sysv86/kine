@@ -135,7 +135,8 @@ fn renders_animated_scene_to_all_containers_and_raw_streams() {
             container,
             ..Default::default()
         };
-        let report = kine_server::render_video(&mut engine, handle, &opts).expect("container render");
+        let report =
+            kine_server::render_video(&mut engine, handle, &opts).expect("container render");
         assert_eq!(report.container, container);
         assert_eq!(report.frames, 4);
         match container {
@@ -377,7 +378,11 @@ fn synth_tracks_and_sidechain_ducking_work_without_external_files() {
     let metrics = clip.metrics();
     assert_eq!(clip.channels, 2);
     assert_eq!(clip.frame_count(), 24_000);
-    assert!((metrics.peak_db - (-1.0)).abs() < 0.25, "peak_db = {}", metrics.peak_db);
+    assert!(
+        (metrics.peak_db - (-1.0)).abs() < 0.25,
+        "peak_db = {}",
+        metrics.peak_db
+    );
 }
 
 #[test]
@@ -416,15 +421,15 @@ fn a_scene_without_audio_writes_no_audio_track() {
 }
 
 #[test]
-fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
-    if !kine_server::VideoEncoder::H266Ffmpeg.is_available() {
-        eprintln!("skipping H.266 test: FFmpeg with libvvenc is not available");
+fn renders_an_animated_scene_to_av1_mp4_and_mkv() {
+    if !kine_server::VideoEncoder::Av1Ffmpeg.is_available() {
+        eprintln!("skipping AV1 test: FFmpeg with an AV1 encoder is not available");
         return;
     }
     let (mut engine, handle) = engine_with(&animated_scene_json());
 
     let mp4_opts = VideoOptions {
-        encoder: VideoEncoder::H266Ffmpeg,
+        encoder: VideoEncoder::Av1Ffmpeg,
         container: VideoContainer::Mp4,
         frames: 8,
         fps_num: 24,
@@ -434,31 +439,75 @@ fn renders_an_animated_scene_to_mp4_and_mkv_with_h266_vvc() {
         keyframe_interval: 4,
         ..Default::default()
     };
-    let mp4_report = kine_server::render_video(&mut engine, handle, &mp4_opts).expect("h266 mp4");
-    assert_eq!(mp4_report.encoder, VideoEncoder::H266Ffmpeg);
+    let mp4_report = kine_server::render_video(&mut engine, handle, &mp4_opts).expect("av1 mp4");
+    assert_eq!(mp4_report.encoder, VideoEncoder::Av1Ffmpeg);
     assert_eq!(mp4_report.frames, 8);
     assert_eq!(mp4_report.samples, 8);
-    // The FFmpeg/libvvenc path is configured all-intra (`IntraPeriod=1`), so
-    // every sample is a keyframe/sync sample.
-    assert_eq!(mp4_report.keyframes, 8);
+    assert!(mp4_report.keyframes >= 1);
     assert!(has(&mp4_report.bytes, b"ftyp"));
-    assert!(has(&mp4_report.bytes, b"vvc1"), "missing vvc1 sample entry");
-    assert!(has(&mp4_report.bytes, b"vvcC"), "missing vvcC config box");
+    assert!(has(&mp4_report.bytes, b"av01"), "missing av01 sample entry");
+    assert!(has(&mp4_report.bytes, b"av1C"), "missing av1C config box");
     assert!(has(&mp4_report.bytes, b"mdat"));
     assert!(has(&mp4_report.bytes, b"moov"));
 
     let mkv_opts = VideoOptions {
-        encoder: VideoEncoder::H266Ffmpeg,
+        encoder: VideoEncoder::Av1Ffmpeg,
         container: VideoContainer::Mkv,
         frames: 6,
         fps_num: 24,
         fps_den: 1,
         quantizer: 80,
         speed: 9,
-        keyframe_interval: 6,
+        keyframe_interval: 3,
         ..Default::default()
     };
-    let mkv_report = kine_server::render_video(&mut engine, handle, &mkv_opts).expect("h266 mkv");
+    let mkv_report = kine_server::render_video(&mut engine, handle, &mkv_opts).expect("av1 mkv");
     assert_eq!(&mkv_report.bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
-    assert!(has(&mkv_report.bytes, b"V_MPEGI/ISO/VVC"));
+    assert!(has(&mkv_report.bytes, b"V_AV1"));
+}
+
+#[test]
+fn renders_an_animated_scene_to_h264_mp4_and_mkv() {
+    if !kine_server::VideoEncoder::H264Ffmpeg.is_available() {
+        eprintln!("skipping H.264 test: FFmpeg with an H.264 encoder is not available");
+        return;
+    }
+    let (mut engine, handle) = engine_with(&animated_scene_json());
+
+    let mp4_opts = VideoOptions {
+        encoder: VideoEncoder::H264Ffmpeg,
+        container: VideoContainer::Mp4,
+        frames: 8,
+        fps_num: 24,
+        fps_den: 1,
+        quantizer: 80,
+        speed: 9,
+        keyframe_interval: 4,
+        ..Default::default()
+    };
+    let mp4_report = kine_server::render_video(&mut engine, handle, &mp4_opts).expect("h264 mp4");
+    assert_eq!(mp4_report.encoder, VideoEncoder::H264Ffmpeg);
+    assert_eq!(mp4_report.frames, 8);
+    assert_eq!(mp4_report.samples, 8);
+    assert!(mp4_report.keyframes >= 1);
+    assert!(has(&mp4_report.bytes, b"ftyp"));
+    assert!(has(&mp4_report.bytes, b"avc1"), "missing avc1 sample entry");
+    assert!(has(&mp4_report.bytes, b"avcC"), "missing avcC config box");
+    assert!(has(&mp4_report.bytes, b"mdat"));
+    assert!(has(&mp4_report.bytes, b"moov"));
+
+    let mkv_opts = VideoOptions {
+        encoder: VideoEncoder::H264Ffmpeg,
+        container: VideoContainer::Mkv,
+        frames: 6,
+        fps_num: 24,
+        fps_den: 1,
+        quantizer: 80,
+        speed: 9,
+        keyframe_interval: 3,
+        ..Default::default()
+    };
+    let mkv_report = kine_server::render_video(&mut engine, handle, &mkv_opts).expect("h264 mkv");
+    assert_eq!(&mkv_report.bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
+    assert!(has(&mkv_report.bytes, b"V_MPEG4/ISO/AVC"));
 }

@@ -5,14 +5,6 @@ name: Benchmark (Manual Only)
 on:
   workflow_dispatch:
     inputs:
-      enable_asm:
-        description: "Build kine-cli with NASM rav1e assembly acceleration (--features asm)"
-        required: false
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
       commit_readme:
         description: "Commit and push the updated benchmark table to README.md"
         required: false
@@ -39,16 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install latest FFmpeg with libvvenc
+      - name: Install latest FFmpeg with AV1 and H.264 encoders
         run: |
           ./scripts/install-ffmpeg.sh
           echo "KINE_FFMPEG=$GITHUB_WORKSPACE/.tools/ffmpeg/bin/ffmpeg" >> "$GITHUB_ENV"
-
-      - name: Install NASM (optional, for --features asm)
-        if: inputs.enable_asm == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nasm
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -57,12 +43,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build headless kine-cli (--release, zero X11/Wayland packages)
-        run: |
-          if [ "${{ inputs.enable_asm }}" = "true" ]; then
-            cargo build --release -p kine-cli --features asm
-          else
-            cargo build --release -p kine-cli
-          fi
+        run: cargo build --release -p kine-cli
 
       - name: Run benchmark and populate README.md table
         run: |

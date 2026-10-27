@@ -8,7 +8,7 @@
 //! * Optional Audio track #2: `A_FLAC` (with `fLaC` + 34-byte STREAMINFO
 //!   metadata block as CodecPrivate).
 
-use crate::{annexb_to_vvcc_packets, build_vvcc_record, AudioSpec, Codec, MuxError};
+use crate::{AudioSpec, Codec, MuxError};
 use std::io::Write;
 
 /// Container DocType written in the EBML header.
@@ -105,12 +105,7 @@ impl<W: Write> MkvMuxer<W> {
         })
     }
 
-    pub fn push_video(
-        &mut self,
-        frame: u64,
-        data: &[u8],
-        keyframe: bool,
-    ) -> Result<(), MuxError> {
+    pub fn push_video(&mut self, frame: u64, data: &[u8], keyframe: bool) -> Result<(), MuxError> {
         let pts_ms = frame * 1_000 * u64::from(self.fps_den) / u64::from(self.fps_num);
         let payload = match self.codec {
             Codec::Av1 => {
@@ -131,14 +126,6 @@ impl<W: Write> MkvMuxer<W> {
                     }
                 }
                 avcc_nals
-            }
-            Codec::H266 => {
-                let (params, vvcc_nals) = annexb_to_vvcc_packets(data);
-                if self.video_codec_private.is_none() && params.has_core_sets() {
-                    self.video_codec_private =
-                        Some(build_vvcc_record(&params, self.width, self.height));
-                }
-                vvcc_nals
             }
         };
 
@@ -179,13 +166,14 @@ impl<W: Write> MkvMuxer<W> {
 
     pub fn finalize(mut self) -> Result<W, MuxError> {
         // Sort interleaved packets by presentation timestamp (ms), video before audio on ties
-        self.packets
-            .sort_by_key(|p| (p.pts_ms, p.track_number));
+        self.packets.sort_by_key(|p| (p.pts_ms, p.track_number));
 
         let duration_ms = self
             .packets
             .last()
-            .map(|p| p.pts_ms as f64 + (1_000.0 * f64::from(self.fps_den) / f64::from(self.fps_num)))
+            .map(|p| {
+                p.pts_ms as f64 + (1_000.0 * f64::from(self.fps_den) / f64::from(self.fps_num))
+            })
             .unwrap_or(0.0);
 
         // 1. EBML Header (0x1A45DFA3)
@@ -222,7 +210,6 @@ impl<W: Write> MkvMuxer<W> {
         let codec_id = match self.codec {
             Codec::Av1 => "V_AV1",
             Codec::H264 => "V_MPEG4/ISO/AVC",
-            Codec::H266 => "V_MPEGI/ISO/VVC",
         };
         write_str_el(&mut v_entry, &[0x86], codec_id);
         if let Some(priv_bytes) = &self.video_codec_private {
@@ -487,24 +474,27 @@ mod tests {
     }
 
     #[test]
-    fn muxes_h266_vvc_into_mkv_with_vvcc_codec_private() {
+    fn muxes_h264_into_mkv_with_avcc_codec_private() {
         let mut mkv = MkvMuxer::new(
             Vec::new(),
             EbmlDocType::Matroska,
-            Codec::H266,
+            Codec::H264,
             640,
             360,
             30,
             1,
         );
         let mut keyframe = Vec::new();
-        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x71, 0x10, 0x00]); // VPS(14)
-        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x79, 0x00, 0x30, 0x02, 0x33]); // SPS(15)
-        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x81, 0x00, 0x40]); // PPS(16)
-        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x00, 0x41, 0x80, 0xAA]); // IDR_N_LP(8)
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1F]);
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x68, 0xCE, 0x3C, 0x80]);
+        keyframe.extend_from_slice(&[0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00]);
         mkv.push_video(0, &keyframe, true).unwrap();
         let bytes = mkv.finalize().unwrap();
         assert_eq!(&bytes[0..4], &[0x1A, 0x45, 0xDF, 0xA3]);
-        assert!(bytes.windows(15).any(|w| w == b"V_MPEGI/ISO/VVC"));
+        assert!(bytes.windows(15).any(|w| w == b"V_MPEG4/ISO/AVC"));
+        // Matroska stores the bare AVCDecoderConfigurationRecord as CodecPrivate.
+        assert!(bytes
+            .windows(8)
+            .any(|w| w == [1, 0x42, 0x00, 0x1F, 0xFF, 0xE1, 0x00, 0x04]));
     }
 }

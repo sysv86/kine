@@ -26,7 +26,5 @@ xilem = { workspace = true, optional = true }
 default = ["xilem-ui", "gpu"]
 # Native Xilem reactive desktop UI (Linux X11/Wayland, Windows DX12/Vulkan, macOS Metal).
 xilem-ui = ["dep:xilem"]
-# Forward GPU rasterization and hardware video encoding features to the in-process session/engine.
+# Forward GPU rasterization to the in-process session/engine.
 gpu = ["kine-session/gpu", "kine-server/gpu"]
-hwencode = ["kine-session/hwencode", "kine-server/hwencode"]
-zero-copy = ["kine-session/zero-copy", "kine-server/zero-copy"]

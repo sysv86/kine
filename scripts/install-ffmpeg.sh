@@ -1,22 +1,64 @@
 #!/usr/bin/env bash
-# Install the latest FFmpeg build that includes libvvenc (software H.266/VVC).
+# Install a recent FFmpeg build with AV1 and H.264 encoders.
 #
-# Uses the BtbN FFmpeg-Builds "lgpl" artefacts, so the external binary does not
-# pull GPL components into the toolchain. The binary is placed in
-# .tools/ffmpeg/bin and is auto-detected by kine-encode. Override with
-# KINE_FFMPEG=/path/to/ffmpeg if you already have a suitable build.
+# Kine encodes AV1 and H.264 through an external FFmpeg process. On Linux and
+# Windows the script downloads the latest BtbN FFmpeg-Builds "lgpl" artefact, so
+# the external binary does not pull GPL components into the toolchain. On macOS
+# BtbN publishes no build, so the script validates an existing `ffmpeg`.
+#
+# The binary is placed in .tools/ffmpeg/bin and is auto-detected by
+# kine-encode. Override with KINE_FFMPEG=/path/to/ffmpeg to use another build.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${KINE_FFMPEG_DIR:-$ROOT/.tools/ffmpeg}"
 
+# Print the first matching encoder name from an FFmpeg build, or nothing.
+first_encoder() {
+    local ffmpeg="$1"
+    shift
+    local list name
+    list="$("$ffmpeg" -hide_banner -encoders 2>/dev/null)"
+    for name in "$@"; do
+        if printf '%s\n' "$list" | grep -E "[[:space:]]${name}[[:space:]]" >/dev/null; then
+            echo "$name"
+            return 0
+        fi
+    done
+}
+
+verify_ffmpeg() {
+    local ffmpeg="$1"
+    local av1 h264
+    av1="$(first_encoder "$ffmpeg" libsvtav1 libaom-av1 || true)"
+    h264="$(first_encoder "$ffmpeg" libopenh264 libx264 || true)"
+    if [[ -z "$av1" ]]; then
+        echo "This FFmpeg build has no AV1 encoder (libsvtav1 or libaom-av1)." >&2
+        return 1
+    fi
+    if [[ -z "$h264" ]]; then
+        echo "This FFmpeg build has no H.264 encoder (libopenh264 or libx264)." >&2
+        return 1
+    fi
+    echo "==> AV1 encoder: $av1"
+    echo "==> H.264 encoder: $h264"
+}
+
 case "$(uname -s)" in
     Linux*) OS=linux ;;
     MINGW*|MSYS*|CYGWIN*) OS=win ;;
     Darwin*)
-        echo "No BtbN macOS build with libvvenc is published." >&2
-        echo "Install FFmpeg with --enable-libvvenc and set KINE_FFMPEG=/path/to/ffmpeg." >&2
-        exit 1
+        # No BtbN macOS artefact: validate the local Homebrew/MacPorts build.
+        if ! command -v ffmpeg >/dev/null 2>&1; then
+            echo "FFmpeg is not installed. Run: brew install ffmpeg" >&2
+            echo "Then set KINE_FFMPEG=\$(command -v ffmpeg) or leave it on PATH." >&2
+            exit 1
+        fi
+        FFMPEG="$(command -v ffmpeg)"
+        verify_ffmpeg "$FFMPEG"
+        echo "==> Installed $("$FFMPEG" -hide_banner -version | head -1)"
+        echo "KINE_FFMPEG=$FFMPEG"
+        exit 0
         ;;
     *)
         echo "Unsupported OS: $(uname -s)" >&2
@@ -62,11 +104,7 @@ cp -a "$INNER"/. "$DEST"/
 
 FFMPEG="$DEST/bin/ffmpeg"
 [[ -x "$FFMPEG" ]] || { echo "FFmpeg binary not found after extraction" >&2; exit 1; }
-if ! "$FFMPEG" -hide_banner -encoders 2>/dev/null | grep libvvenc >/dev/null; then
-    echo "This FFmpeg build has no libvvenc encoder; cannot encode H.266." >&2
-    exit 1
-fi
+verify_ffmpeg "$FFMPEG"
 
 echo "==> Installed $("$FFMPEG" -hide_banner -version | head -1)"
-echo "==> H.266 encoder: libvvenc"
 echo "KINE_FFMPEG=$FFMPEG"

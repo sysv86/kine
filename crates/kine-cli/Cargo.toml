@@ -27,11 +27,4 @@ taffy.workspace = true
 default = ["gpu"]
 # Optional native Xilem desktop UI for `kine studio` (opt-in via `--features studio-ui`).
 studio-ui = ["dep:kine-studio", "kine-studio/xilem-ui"]
-# Optional NASM assembly acceleration for rav1e software AV1 encoding on x86_64 servers.
-asm = ["kine-server/asm"]
-# Hardware H.264 encode (Vulkan Video) in addition to the software AV1 / H.266 (VVC) paths.
-hwencode = ["kine-server/hwencode", "kine-session/hwencode", "kine-studio?/hwencode"]
 gpu = ["kine-server/gpu", "kine-session/gpu", "kine-studio?/gpu"]
-# The closed loop: GPU-rasterized texture handed to the hardware encoder with no
-# readback (needs both `gpu` and `hwencode`).
-zero-copy = ["kine-server/zero-copy", "kine-session/zero-copy", "kine-studio?/zero-copy"]

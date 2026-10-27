@@ -34,8 +34,8 @@ USAGE:
                   --out <file|dir/|->
                   [--format mp4|mkv|webm|y4m|gif|kvid|rgba|i420|nv12|png|qoi|bmp|ppm|pam|tga]
                   [--seq] [--frame N] [--frames N] [--fps 30] [--quality Q] [--speed 0-10]
-                  [--encoder av1|h266|vvc|h264-hw|h264-zero-copy] [--bitrate BPS]
-                  # h266/vvc requires an FFmpeg build with libvvenc (scripts/install-ffmpeg.sh)
+                  [--encoder av1|h264] [--bitrate BPS]
+                  # Both codecs are encoded by FFmpeg; run scripts/install-ffmpeg.sh once.
                   [--backend auto|gpu|cpu]
   kine strip      --scene <scene> --out <strip.png> [--frames 6] [--fps 30]
   kine onion      --scene <scene> --out <onion.png> [--frames 6] [--fps 30]
@@ -531,42 +531,18 @@ fn main() -> ExitCode {
 
                 let requested = flag_or("--encoder", "av1");
                 match requested.to_ascii_lowercase().as_str() {
-                    "av1" | "software" => opts.encoder = VideoEncoder::Av1Software,
-                    "h266" | "vvc" | "h266-sw" | "vvc-sw" => {
-                        opts.encoder = VideoEncoder::H266Ffmpeg
-                    }
-                    #[cfg(feature = "hwencode")]
-                    "h264-hw" | "hardware" | "h264" => opts.encoder = VideoEncoder::H264Hardware,
-                    #[cfg(not(feature = "hwencode"))]
-                    "h264-hw" | "hardware" | "h264" => {
-                        eprintln!(
-                            "this build has no hardware encoder; rebuild with --features hwencode"
-                        );
-                        return ExitCode::FAILURE;
-                    }
-                    #[cfg(feature = "zero-copy")]
-                    "h264-zero-copy" | "zero-copy" | "zerocopy" => {
-                        opts.encoder = VideoEncoder::H264ZeroCopy
-                    }
-                    #[cfg(not(feature = "zero-copy"))]
-                    "h264-zero-copy" | "zero-copy" | "zerocopy" => {
-                        eprintln!(
-                            "this build has no zero-copy encoder; rebuild with --features zero-copy"
-                        );
-                        return ExitCode::FAILURE;
-                    }
+                    "av1" => opts.encoder = VideoEncoder::Av1Ffmpeg,
+                    "h264" | "avc" => opts.encoder = VideoEncoder::H264Ffmpeg,
                     other => {
-                        eprintln!(
-                            "unknown encoder {other:?} (expected av1, h266/vvc, h264-hw or h264-zero-copy)"
-                        );
+                        eprintln!("unknown encoder {other:?} (expected av1 or h264)");
                         return ExitCode::FAILURE;
                     }
                 }
 
                 if !opts.encoder.is_available() {
                     eprintln!(
-                        "encoder {} is not available on this host: it needs a GPU adapter with \
-                         hardware video encode support (Vulkan Video on Linux, VideoToolbox on macOS)",
+                        "encoder {} is not available: FFmpeg with the required encoder was not \
+                         found. Run scripts/install-ffmpeg.sh or set KINE_FFMPEG.",
                         opts.encoder.name(),
                     );
                     return ExitCode::FAILURE;
@@ -1047,51 +1023,64 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     }
     let color_ms = t2.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_color);
 
-    // 4. H.266 / VVC encode through FFmpeg/libvvenc + MP4 (vvc1/vvcC) mux (12 frames)
-    let mut vvc_opts = VideoOptions::default();
-    vvc_opts.encoder = VideoEncoder::H266Ffmpeg;
-    vvc_opts.container = VideoContainer::Mp4;
-    vvc_opts.frames = 12;
-    vvc_opts.fps_num = 30;
-    vvc_opts.quantizer = 100;
-    vvc_opts.speed = 9;
-    let t3 = Instant::now();
-    let vvc_report = match kine_server::render_video(engine, handle, &vvc_opts) {
-        Ok(r) => Some(r),
-        Err(e) => {
-            eprintln!("bench h266 unavailable: {e}");
-            None
-        }
-    };
-    let vvc_total_ms = t3.elapsed().as_secs_f64() * 1000.0;
-    let vvc_fps = (vvc_opts.frames as f64) / (vvc_total_ms / 1000.0).max(1e-6);
-    let (vvc_latency, vvc_throughput, vvc_size) = match &vvc_report {
-        Some(report) => (
-            format!("`{:.2} ms/frame`", vvc_total_ms / (vvc_opts.frames as f64)),
-            format!("`{vvc_fps:.1} fps`"),
-            format!("`{} B`", report.bytes.len()),
-        ),
-        None => ("`n/a`".to_string(), "`n/a`".to_string(), "`n/a`".to_string()),
-    };
-
-    // 5. AV1 (rav1e) software encode + MP4 (av01) mux (12 frames)
+    // 4. AV1 encode through FFmpeg (libsvtav1) + MP4 (av01) mux (12 frames)
     let mut av1_opts = VideoOptions::default();
-    av1_opts.encoder = VideoEncoder::Av1Software;
+    av1_opts.encoder = VideoEncoder::Av1Ffmpeg;
     av1_opts.container = VideoContainer::Mp4;
     av1_opts.frames = 12;
     av1_opts.fps_num = 30;
     av1_opts.quantizer = 120;
     av1_opts.speed = 10;
-    let t4 = Instant::now();
-    let av1_report = match kine_server::render_video(engine, handle, &av1_opts) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("bench av1 error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let av1_total_ms = t4.elapsed().as_secs_f64() * 1000.0;
+    let t3 = Instant::now();
+    let av1_report = kine_server::render_video(engine, handle, &av1_opts).ok();
+    let av1_total_ms = t3.elapsed().as_secs_f64() * 1000.0;
     let av1_fps = (av1_opts.frames as f64) / (av1_total_ms / 1000.0).max(1e-6);
+    if av1_report.is_none() {
+        eprintln!("bench av1 unavailable: FFmpeg with an AV1 encoder was not found");
+    }
+    let (av1_latency, av1_throughput, av1_size) = match &av1_report {
+        Some(report) => (
+            format!("`{:.2} ms/frame`", av1_total_ms / (av1_opts.frames as f64)),
+            format!("`{av1_fps:.1} fps`"),
+            format!("`{} B`", report.bytes.len()),
+        ),
+        None => (
+            "`n/a`".to_string(),
+            "`n/a`".to_string(),
+            "`n/a`".to_string(),
+        ),
+    };
+
+    // 5. H.264 encode through FFmpeg (libopenh264) + MP4 (avc1) mux (12 frames)
+    let mut h264_opts = VideoOptions::default();
+    h264_opts.encoder = VideoEncoder::H264Ffmpeg;
+    h264_opts.container = VideoContainer::Mp4;
+    h264_opts.frames = 12;
+    h264_opts.fps_num = 30;
+    h264_opts.quantizer = 120;
+    h264_opts.speed = 10;
+    let t4 = Instant::now();
+    let h264_report = kine_server::render_video(engine, handle, &h264_opts).ok();
+    let h264_total_ms = t4.elapsed().as_secs_f64() * 1000.0;
+    let h264_fps = (h264_opts.frames as f64) / (h264_total_ms / 1000.0).max(1e-6);
+    if h264_report.is_none() {
+        eprintln!("bench h264 unavailable: FFmpeg with an H.264 encoder was not found");
+    }
+    let (h264_latency, h264_throughput, h264_size) = match &h264_report {
+        Some(report) => (
+            format!(
+                "`{:.2} ms/frame`",
+                h264_total_ms / (h264_opts.frames as f64)
+            ),
+            format!("`{h264_fps:.1} fps`"),
+            format!("`{} B`", report.bytes.len()),
+        ),
+        None => (
+            "`n/a`".to_string(),
+            "`n/a`".to_string(),
+            "`n/a`".to_string(),
+        ),
+    };
 
     // 6. Headless StudioState agent tool dispatch (`studio_status` + `studio_transform`)
     let mut studio = kine_session::StudioState::new(None);
@@ -1111,8 +1100,8 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
          | **Scene Parse + Static Inspect** | 1280×720 AST | `{load_ms:.2} ms/op` | `{:.1} ops/s` | — | `{}` (`{}`) |\n\
          | **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `{raster_ms:.2} ms/frame` | `{:.1} fps` | `3,686,400 B` | `{}` |\n\
          | **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `{color_ms:.2} ms/frame` | `{:.1} fps` | `1,382,400 B` | `16-bit int + MT` |\n\
-         | **H.266 / VVC Encode + MP4 (`vvc1`/`vvcC`)** | 1280×720 · 12f | {vvc_latency} | {vvc_throughput} | {vvc_size} | `ffmpeg libvvenc` |\n\
-         | **AV1 Encode + MP4 (`av01`, speed 10)** | 1280×720 · 12f | `{:.2} ms/frame` | `{av1_fps:.1} fps` | `{} B` | `rav1e (asm={})` |\n\
+         | **AV1 Encode + MP4 (`av01`)** | 1280×720 · 12f | {av1_latency} | {av1_throughput} | {av1_size} | `ffmpeg libsvtav1` |\n\
+         | **H.264 Encode + MP4 (`avc1`)** | 1280×720 · 12f | {h264_latency} | {h264_throughput} | {h264_size} | `ffmpeg libopenh264` |\n\
          | **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `{bridge_ms:.2} ms/call` | `{:.1} calls/s` | — | `in-process` |",
         1000.0 / load_ms.max(1e-6),
         doc.platform,
@@ -1120,9 +1109,6 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
         1000.0 / raster_ms.max(1e-6),
         doc.renderer,
         1000.0 / color_ms.max(1e-6),
-        av1_total_ms / (av1_opts.frames as f64),
-        av1_report.bytes.len(),
-        doc.rav1e_asm_enabled,
         1000.0 / bridge_ms.max(1e-6),
     );
 
@@ -1165,14 +1151,13 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
             "platform": doc.platform,
             "arch": std::env::consts::ARCH,
             "renderer": doc.renderer,
-            "rav1e_asm_enabled": doc.rav1e_asm_enabled,
             "scene_parse_inspect_ms": load_ms,
             "cpu_raster_1280x720_ms": raster_ms,
             "bt709_rgba_to_i420_ms": color_ms,
-            "h266_vvc_mp4_fps": vvc_report.as_ref().map(|_| vvc_fps),
-            "h266_vvc_mp4_bytes": vvc_report.as_ref().map(|r| r.bytes.len()),
-            "av1_mp4_fps": av1_fps,
-            "av1_mp4_bytes": av1_report.bytes.len(),
+            "av1_mp4_fps": av1_report.as_ref().map(|_| av1_fps),
+            "av1_mp4_bytes": av1_report.as_ref().map(|r| r.bytes.len()),
+            "h264_mp4_fps": h264_report.as_ref().map(|_| h264_fps),
+            "h264_mp4_bytes": h264_report.as_ref().map(|r| r.bytes.len()),
             "session_agent_status_ms": bridge_ms,
             "markdown": md_table,
         });

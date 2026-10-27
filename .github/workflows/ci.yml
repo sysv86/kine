@@ -35,7 +35,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install latest FFmpeg with libvvenc (Linux)
+      - name: Install latest FFmpeg with AV1 and H.264 encoders (Linux)
         if: runner.os == 'Linux'
         run: |
           ./scripts/install-ffmpeg.sh

@@ -1,22 +1,24 @@
-//! Video encoding (AV1 via `rav1e`, H.266/VVC via an external FFmpeg with
-//! `libvvenc`), decoding, and uncompressed/lossless stream formats.
+//! Video encoding via an external FFmpeg (AV1 and H.264), decoding, and
+//! uncompressed/lossless stream formats.
 //!
 //! Colour handling is **BT.709 limited range** for 8-bit SDR, with the matrix
 //! applied explicitly using integer fixed-point arithmetic rather than assumed
 //! from a library default.
 
-pub mod av1;
 pub mod color;
 pub mod ffmpeg;
 pub mod raw;
+pub mod settings;
 pub mod y4m;
 
-pub use av1::{Av1Encoder, EncoderSettings};
 pub use color::{i420_to_rgba, i444_to_rgba, nv12_to_rgba, rgba_to_i420, rgba_to_nv12, I420Frame};
-pub use ffmpeg::{ffmpeg_vvc_available, ffmpeg_vvc_path, ffmpeg_vvc_version, FfmpegVvcEncoder};
+pub use ffmpeg::{
+    ffmpeg_available, ffmpeg_encoder_name, ffmpeg_path, ffmpeg_version, FfmpegCodec, FfmpegEncoder,
+};
 pub use raw::{
     decode_kvid, decode_raw_stream, encode_kvid, encode_raw_frame, KvidVideo, RawPixelFormat,
 };
+pub use settings::EncoderSettings;
 pub use y4m::{decode_y4m, Y4mEncoder, Y4mVideo};
 
 #[derive(Debug, thiserror::Error)]
@@ -42,23 +44,8 @@ pub enum EncodeError {
 /// One coded access unit, ready for the muxer.
 #[derive(Debug, Clone)]
 pub struct AccessUnit {
-    /// Coded bytes: OBU stream for AV1, Annex-B for H.266/VVC and H.264.
+    /// Coded bytes: low-overhead OBU for AV1, Annex-B for H.264.
     pub data: Vec<u8>,
     /// True when this unit is a sync sample (IDR / CRA / AV1 keyframe).
     pub keyframe: bool,
-}
-
-/// Result of pushing one frame: the access units that became available.
-#[derive(Debug, Default)]
-pub struct EncodeOutput {
-    /// Access units in stream order.
-    pub units: Vec<AccessUnit>,
-    /// Whether the *first* unit produced here is a keyframe.
-    pub starts_keyframe: bool,
-}
-
-impl EncodeOutput {
-    pub fn is_empty(&self) -> bool {
-        self.units.is_empty()
-    }
 }

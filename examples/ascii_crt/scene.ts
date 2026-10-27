@@ -5,7 +5,7 @@
 //
 // Heavy on purpose: ~90 march steps per pixel + 3x24-tap bloom at 1080p.
 // Render: kine render --scene examples/ascii_crt/scene.ts --out out.mp4 \
-//                   --frames 180 --fps 30 --backend gpu --encoder h264-zero-copy
+//                   --frames 180 --fps 30 --backend gpu --encoder h264
 
 const W = 1920;
 const H = 1080;

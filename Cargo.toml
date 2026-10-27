@@ -59,9 +59,3 @@ muxfin = "0.5"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 xilem = "0.4.0"
-# Hardware video coding. Taken from upstream `master` rather than the published
-# 0.4.0 because 0.4.0 is still pinned to wgpu 29, while upstream has moved to
-# wgpu 30 — the same major as our rasterizer. Sharing that major is exactly what
-# makes a rendered texture acceptable to the encoder without a host round trip,
-# so this is a correctness pin, not a preference.
-gpu-video = { git = "https://github.com/software-mansion/smelter", default-features = false, features = ["wgpu"] }
