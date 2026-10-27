@@ -82,8 +82,21 @@ fn has(bytes: &[u8], needle: &[u8]) -> bool {
     bytes.windows(needle.len()).any(|w| w == needle)
 }
 
+/// Encoding is delegated to FFmpeg; skip a test when the host has no build.
+fn av1_available_or_skip(test: &str) -> bool {
+    if VideoEncoder::Av1Ffmpeg.is_available() {
+        true
+    } else {
+        eprintln!("skipping {test}: FFmpeg with an AV1 encoder is not available");
+        false
+    }
+}
+
 #[test]
 fn renders_an_animated_scene_to_mp4() {
+    if !av1_available_or_skip("renders_an_animated_scene_to_mp4") {
+        return;
+    }
     let (mut engine, handle) = engine_with(&animated_scene_json());
     assert!(engine.is_animated(handle).unwrap());
 
@@ -113,6 +126,9 @@ fn renders_an_animated_scene_to_mp4() {
 
 #[test]
 fn renders_animated_scene_to_all_containers_and_raw_streams() {
+    if !av1_available_or_skip("renders_animated_scene_to_all_containers_and_raw_streams") {
+        return;
+    }
     let (mut engine, handle) = engine_with(&animated_scene_json());
 
     for container in [
@@ -232,6 +248,9 @@ fn video_input_node_reads_rendered_y4m_gif_and_kvid_files() {
 
 #[test]
 fn a_static_scene_reports_that_nothing_moved() {
+    if !av1_available_or_skip("a_static_scene_reports_that_nothing_moved") {
+        return;
+    }
     let (mut engine, handle) = engine_with(&static_scene_json());
     assert!(!engine.is_animated(handle).unwrap());
 
@@ -311,6 +330,9 @@ fn scene_with_audio(audio: serde_json::Value) -> String {
 
 #[test]
 fn a_scene_audio_bed_lands_in_the_mp4() {
+    if !av1_available_or_skip("a_scene_audio_bed_lands_in_the_mp4") {
+        return;
+    }
     let dir = scratch_dir("audio-scene");
     write_tone(&dir, "tone.wav", 1.0, 0.5);
 
@@ -408,6 +430,9 @@ fn a_missing_audio_source_is_an_error_not_a_silent_drop() {
 
 #[test]
 fn a_scene_without_audio_writes_no_audio_track() {
+    if !av1_available_or_skip("a_scene_without_audio_writes_no_audio_track") {
+        return;
+    }
     let (mut engine, handle) = engine_with(&static_scene_json());
     let opts = VideoOptions {
         frames: 3,

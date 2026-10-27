@@ -41,6 +41,27 @@ jobs:
           ./scripts/install-ffmpeg.sh
           echo "KINE_FFMPEG=$GITHUB_WORKSPACE/.tools/ffmpeg/bin/ffmpeg" >> "$GITHUB_ENV"
 
+      - name: Install FFmpeg with AV1 and H.264 encoders (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg
+          echo "KINE_FFMPEG=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+          ffmpeg -hide_banner -encoders | grep -E 'libsvtav1|libaom-av1|libopenh264|libx264'
+
+      - name: Install latest FFmpeg with AV1 and H.264 encoders (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'ffmpeg'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dir
+          $ff = Get-ChildItem $dir -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          "KINE_FFMPEG=$($ff.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & $ff.FullName -hide_banner -encoders | Select-String 'libsvtav1|libaom-av1|libopenh264|libx264'
+
       - name: Cache Cargo registry and target
         uses: Swatinem/rust-cache@v2
 
