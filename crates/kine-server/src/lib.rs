@@ -14,9 +14,3 @@ pub use video::{
     mix_scene_audio, render_video, transcode_video_clip, VideoContainer, VideoEncoder,
     VideoOptions, VideoReport,
 };
-
-/// Benchmark helper converting premultiplied RGBA8 pixels to BT.709 limited-range I420.
-pub fn rgba_to_i420_bench_shim(rgba: &[u8], width: u32, height: u32) -> usize {
-    let f = kine_encode::rgba_to_i420(rgba, width, height);
-    f.y.len() + f.u.len() + f.v.len()
-}

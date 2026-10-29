@@ -52,22 +52,26 @@ All headless Studio state (`StudioState`), NLE timeline track construction (`tim
 
 ## Benchmarks
 
-The benchmark table below is populated **only** when the manual **Benchmark (`workflow_dispatch`)** GitHub Actions workflow (`.github/workflows/benchmark.yml`) is triggered (`gh workflow run benchmark.yml` or via the GitHub Actions UI). It does not run automatically on push or pull_request.
+The benchmark measures Kine's **own** engine paths on the portable CPU backend: JSON and TypeScript scene compilation, animation sampling + taffy layout, dense CPU rasterization, the `naga` WGSL CPU VM post chain, in-process PNG export, the audio DSP mixer, and in-process Studio agent dispatch. The external FFmpeg codec is deliberately excluded — codec throughput is FFmpeg's metric, not Kine's. Every row is headless and CPU-only; no external binary is in the measurement path.
+
+The table below is populated **only** when the manual **Kine Engine Benchmark (`workflow_dispatch`)** GitHub Actions workflow (`.github/workflows/benchmark.yml`) is triggered (`gh workflow run benchmark.yml` or via the GitHub Actions UI). It does not run automatically on push or pull_request.
 
 <!-- BENCHMARK_TABLE_START -->
-| Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |
-| :--- | :--- | ---: | ---: | ---: | :--- |
-| **Scene Parse + Static Inspect** | 1280×720 AST | `0.14 ms/op` | `6922.7 ops/s` | — | `linux` (`x86_64`) |
-| **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `2.34 ms/frame` | `426.9 fps` | `3,686,400 B` | `vello_cpu-sparse-strips` |
-| **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `2.56 ms/frame` | `390.7 fps` | `1,382,400 B` | `16-bit int + MT` |
-| **AV1 Encode + MP4 (`av01`)** | 1280×720 · 12f | `16.97 ms/frame` | `58.9 fps` | `8813 B` | `ffmpeg libsvtav1` |
-| **H.264 Encode + MP4 (`avc1`)** | 1280×720 · 12f | `7.36 ms/frame` | `135.8 fps` | `19193 B` | `ffmpeg libopenh264` |
-| **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `0.02 ms/call` | `47431.2 calls/s` | — | `in-process` |
+| Kine Subsystem | Benchmark Workload | Median Latency | Throughput | Detail | Host / Engine |
+| :--- | :--- | ---: | ---: | :--- | :--- |
+| **JSON scene compile** | 256 nodes · 1920×1080 | `0.67 ms/op` | `1500.4 compiles/s` | serde → SceneDef → taffy | `linux` (`x86_64`) · `cpu` |
+| **TypeScript scene compile** | 200 nodes · 28 KiB TS | `2.57 ms/op` | `389.4 compiles/s` | oxc → QuickJS → taffy | `linux` (`x86_64`) · `cpu` |
+| **Animation + layout** | 256 nodes · 4 s sweep | `0.09 ms/frame` | `11071.4 layouts/s` | `apply_time` + `compute_layout` | `linux` (`x86_64`) · `cpu` |
+| **CPU rasterization** | 256 nodes · 1920×1080 | `38.93 ms/frame` | `25.7 fps` | `2.07 Mpix/frame` · `vello_cpu` | `linux` (`x86_64`) · `cpu` |
+| **WGSL CPU VM post chain** | 3 full-frame passes · 1920×1080 | `845.18 ms/frame` | `1.2 fps` | `2.07 Mpix/frame` · `naga` VM | `linux` (`x86_64`) · `cpu` |
+| **PNG frame export** | 1920×1080 RGBA8 | `59.10 ms/frame` | `16.9 fps` | `949 KiB/frame` · in-process | `linux` (`x86_64`) · `cpu` |
+| **Audio DSP mix** | 8 tracks · 12 s · 48 kHz stereo | `214.41 ms/mix` | `56.0× realtime` | synth + biquad EQ + compressor | `linux` (`x86_64`) · `cpu` |
+| **Studio agent dispatch** | `studio_status` + tree + selection | `23.5 µs/call` | `42507.4 calls/s` | in-process `kine-session` | `linux` (`x86_64`) · `cpu` |
 <!-- BENCHMARK_TABLE_END -->
 
-Both codec rows use the external FFmpeg build; if it is missing, the rows
-report `n/a` instead of failing the benchmark. Run `scripts/install-ffmpeg.sh`
-once to install a build with `libsvtav1` and `libopenh264`.
+Each row is a median over repeated runs on the same workload; `n/a` would only
+appear if a subsystem failed to initialise. The benchmark needs no FFmpeg and no
+GPU, so `ubuntu-latest` numbers are directly comparable across runs.
 
 To run the benchmark locally or update the table manually:
 

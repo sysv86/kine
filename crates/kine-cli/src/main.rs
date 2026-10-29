@@ -67,7 +67,9 @@ USAGE:
                   export [--format <fmt>] [--out <path>] | call --tool <name> [--args <json>] |
                   batch (--file <f>|--inline <json>) | schema | watch
   kine bench      [--markdown] [--update-readme <README.md>]
-                                              run pipeline benchmarks and optionally update README table
+                                              benchmark Kine engine internals (compile, layout,
+                                              raster, WGSL CPU VM, PNG, audio DSP, agent bridge)
+                                              and optionally update the README table
   kine serve      [--listen 127.0.0.1:7700]
 "
 }
@@ -971,9 +973,257 @@ fn starter_scene_json() -> String {
     serde_json::to_string_pretty(&def).unwrap()
 }
 
-fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
-    use std::time::Instant;
+/// Resolution used by the raster, layout, shader and PNG benchmark rows.
+const BENCH_WIDTH: u32 = 1920;
+const BENCH_HEIGHT: u32 = 1080;
+const BENCH_PALETTE: [&str; 7] = [
+    "#5ee0c0", "#f2b880", "#eb6f92", "#9ccfd8", "#c4a7e7", "#31748f", "#f6c177",
+];
 
+/// Median wall-clock time of `iters` runs, in milliseconds.
+fn bench_median_ms(warmup: u32, iters: u32, mut run: impl FnMut()) -> f64 {
+    for _ in 0..warmup {
+        run();
+    }
+    let mut samples = Vec::with_capacity(iters as usize);
+    for _ in 0..iters.max(1) {
+        let start = std::time::Instant::now();
+        run();
+        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    samples[samples.len() / 2]
+}
+
+/// A deterministic, Kine-only stress composition: a dense grid of gradients,
+/// shadows, strokes, paths, rotated cards and shaped text with animation tracks.
+fn bench_heavy_scene_json(node_count: usize) -> String {
+    let cols = 24usize;
+    let rows = node_count.max(1).div_ceil(cols);
+    let cell_w = BENCH_WIDTH as f32 / cols as f32;
+    let cell_h = BENCH_HEIGHT as f32 / rows as f32;
+
+    let mut children = vec![serde_json::json!({
+        "kind": "rect",
+        "fill": "#070912",
+        "position": "absolute",
+        "inset": { "top": 0, "left": 0, "right": 0, "bottom": 0 },
+        "gradient": {
+            "kind": "linear",
+            "angle": 135.0,
+            "stops": [
+                { "offset": 0.0, "color": "#070912" },
+                { "offset": 1.0, "color": "#1b2340" }
+            ]
+        }
+    })];
+
+    for i in 0..node_count {
+        let col = i % cols;
+        let row = i / cols;
+        let x = col as f32 * cell_w;
+        let y = row as f32 * cell_h;
+        let w = (cell_w - 8.0).max(4.0);
+        let h = (cell_h - 8.0).max(4.0);
+        let color = BENCH_PALETTE[i % BENCH_PALETTE.len()];
+        let angle = (i as f32 * 17.0) % 360.0;
+
+        let mut node = match i % 6 {
+            0 => serde_json::json!({
+                "kind": "rect",
+                "fill": color,
+                "cornerRadius": 6.0,
+                "strokeColor": "#ffffff22",
+                "strokeWidth": 1.0,
+                "shadowColor": "#000000aa",
+                "shadowBlur": 9.0,
+                "shadowOffsetX": 2.0,
+                "shadowOffsetY": 3.0,
+                "gradient": {
+                    "kind": "linear",
+                    "angle": angle,
+                    "stops": [
+                        { "offset": 0.0, "color": color },
+                        { "offset": 1.0, "color": "#ffffff" }
+                    ]
+                }
+            }),
+            1 => serde_json::json!({
+                "kind": "circle",
+                "fill": color,
+                "radius": (w.min(h) * 0.5 - 2.0).max(1.0),
+                "strokeColor": "#ffffff33",
+                "strokeWidth": 2.0,
+                "shadowColor": "#00000099",
+                "shadowBlur": 7.0
+            }),
+            2 => serde_json::json!({
+                "kind": "path",
+                "d": "M 12 0 L 15 8 L 24 8 L 17 13 L 20 22 L 12 16 L 4 22 L 7 13 L 0 8 L 9 8 Z",
+                "fill": color,
+                "rotation": angle
+            }),
+            3 => serde_json::json!({
+                "kind": "text",
+                "content": format!("NODE {i:03} kinetic"),
+                "fontFamily": "JetBrains Mono",
+                "fontSize": 13.0,
+                "color": color,
+                "align": "center"
+            }),
+            4 => serde_json::json!({
+                "kind": "rect",
+                "fill": color,
+                "cornerRadius": 4.0,
+                "rotation": angle,
+                "opacity": 0.82,
+                "gradient": {
+                    "kind": "radial",
+                    "stops": [
+                        { "offset": 0.0, "color": "#ffffff" },
+                        { "offset": 1.0, "color": color }
+                    ]
+                }
+            }),
+            _ => serde_json::json!({
+                "kind": "rect",
+                "fill": "#101830",
+                "cornerRadius": 3.0,
+                "strokeColor": color,
+                "strokeWidth": 2.0,
+                "shadowColor": color,
+                "shadowBlur": 12.0,
+                "shadowOffsetY": 0.0
+            }),
+        };
+
+        node["position"] = serde_json::json!("absolute");
+        node["inset"] = serde_json::json!({ "top": y + 4.0, "left": x + 4.0 });
+        node["size"] = serde_json::json!({ "width": w, "height": h });
+
+        if i % 3 == 0 {
+            node["animate"] = serde_json::json!({
+                "rotation": { "from": 0.0, "to": 360.0, "start": 0.0, "end": 4.0, "easing": "linear" },
+                "opacity": { "from": 0.35, "to": 1.0, "start": 0.0, "end": 2.0, "easing": "easeOut" }
+            });
+        }
+        children.push(node);
+    }
+
+    serde_json::json!({
+        "width": BENCH_WIDTH,
+        "height": BENCH_HEIGHT,
+        "root": {
+            "kind": "container",
+            "size": { "width": BENCH_WIDTH, "height": BENCH_HEIGHT },
+            "children": children
+        }
+    })
+    .to_string()
+}
+
+/// The same stress composition authored as a large TypeScript scene, so the
+/// row measures oxc transpilation + QuickJS evaluation, not just JSON serde.
+fn bench_heavy_scene_ts(node_count: usize) -> String {
+    let cols = 20usize;
+    let rows = node_count.max(1).div_ceil(cols);
+    let cell_w = BENCH_WIDTH as f32 / cols as f32;
+    let cell_h = BENCH_HEIGHT as f32 / rows as f32;
+
+    let mut src = String::with_capacity(node_count * 260 + 512);
+    src.push_str("const W = 1920;\nconst H = 1080;\nreturn scene(W, H, container({ size: { width: W, height: H } }, [\n");
+    src.push_str("  rect({ fill: \"#070912\", position: \"absolute\", inset: { top: 0, left: 0, right: 0, bottom: 0 } }),\n");
+    for i in 0..node_count {
+        let col = i % cols;
+        let row = i / cols;
+        let x = col as f32 * cell_w;
+        let y = row as f32 * cell_h;
+        let w = (cell_w - 8.0).max(4.0);
+        let h = (cell_h - 8.0).max(4.0);
+        let color = BENCH_PALETTE[i % BENCH_PALETTE.len()];
+        let opts = serde_json::json!({
+            "fill": color,
+            "position": "absolute",
+            "inset": { "top": y + 4.0, "left": x + 4.0 },
+            "size": { "width": w, "height": h }
+        });
+        match i % 4 {
+            0 => src.push_str(&format!("  rect({opts}),\n")),
+            1 => src.push_str(&format!("  circle({opts}),\n")),
+            2 => src.push_str(&format!(
+                "  text(\"NODE {i:03}\", {opts}),\n"
+            )),
+            _ => src.push_str(&format!(
+                "  path(\"M 12 0 L 15 8 L 24 8 L 17 13 L 20 22 L 12 16 L 4 22 L 7 13 L 0 8 L 9 8 Z\", {opts}),\n"
+            )),
+        }
+    }
+    src.push_str("]));\n");
+    src
+}
+
+/// A frame that pushes three full-frame WGSL passes through the CPU shader VM.
+fn bench_shader_scene_json() -> String {
+    serde_json::json!({
+        "width": BENCH_WIDTH,
+        "height": BENCH_HEIGHT,
+        "root": {
+            "kind": "container",
+            "size": { "width": BENCH_WIDTH, "height": BENCH_HEIGHT },
+            "children": [
+                {
+                    "kind": "rect",
+                    "position": "absolute",
+                    "inset": { "top": 0, "left": 0, "right": 0, "bottom": 0 },
+                    "gradient": {
+                        "kind": "linear",
+                        "angle": 45.0,
+                        "stops": [
+                            { "offset": 0.0, "color": "#05070f" },
+                            { "offset": 0.5, "color": "#1b2340" },
+                            { "offset": 1.0, "color": "#5ee0c0" }
+                        ]
+                    }
+                },
+                {
+                    "kind": "text",
+                    "content": "KINE WGSL CPU VM",
+                    "fontFamily": "JetBrains Mono",
+                    "fontSize": 92.0,
+                    "color": "#ffffff",
+                    "align": "center",
+                    "position": "absolute",
+                    "inset": { "top": 470, "left": 0 },
+                    "size": { "width": BENCH_WIDTH, "height": 120 }
+                },
+                {
+                    "kind": "shader",
+                    "shader": "preset:vignette",
+                    "uniforms": { "intensity": 0.45, "smoothness": 1.8 },
+                    "position": "absolute",
+                    "inset": { "top": 0, "left": 0, "right": 0, "bottom": 0 }
+                },
+                {
+                    "kind": "shader",
+                    "shader": "preset:chromaticAberration",
+                    "uniforms": { "shift": 0.004 },
+                    "position": "absolute",
+                    "inset": { "top": 0, "left": 0, "right": 0, "bottom": 0 }
+                },
+                {
+                    "kind": "shader",
+                    "shader": "preset:colorGrade",
+                    "uniforms": { "contrast": 1.08, "saturation": 1.1, "brightness": 0.0, "gamma": 1.0 },
+                    "position": "absolute",
+                    "inset": { "top": 0, "left": 0, "right": 0, "bottom": 0 }
+                }
+            ]
+        }
+    })
+    .to_string()
+}
+
+fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     let flag = |name: &str| -> Option<String> {
         sub_args
             .iter()
@@ -983,8 +1233,30 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
     };
     let has_flag = |name: &str| -> bool { sub_args.iter().any(|a| a == name) };
 
-    let starter = starter_scene_json();
-    let handle = match engine.load_scene_json(&starter) {
+    // Benchmarks measure Kine's own engine paths. The external FFmpeg codec is
+    // deliberately excluded: its speed says nothing about this codebase.
+    engine.set_backend(RenderBackend::Cpu);
+
+    let const_nodes = 256usize;
+    let const_ts_nodes = 200usize;
+    let heavy_json = bench_heavy_scene_json(const_nodes);
+    let heavy_ts = bench_heavy_scene_ts(const_ts_nodes);
+    let ts_kib = heavy_ts.len() as f64 / 1024.0;
+
+    // 1. JSON scene compile: serde → SceneDef → kine_core layout tree.
+    let compile_json_ms = bench_median_ms(2, 25, || {
+        let h = engine
+            .load_scene_json(&heavy_json)
+            .expect("load JSON scene");
+        engine.free_scene(h);
+    });
+
+    // 2. TypeScript scene compile: oxc transpile → QuickJS eval → authoring → layout.
+    let compile_ts_ms = bench_median_ms(1, 15, || {
+        let _ = kine_script::eval_scene_ts(&heavy_ts).expect("evaluate TS scene");
+    });
+
+    let heavy_handle = match engine.load_scene_json(&heavy_json) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("bench scene load error: {e}");
@@ -992,124 +1264,98 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
         }
     };
 
-    // 1. Scene JSON/DSL load + inspect
-    let t0 = Instant::now();
-    let iters_load = 20u32;
-    for _ in 0..iters_load {
-        let h = engine.load_scene_json(&starter).expect("load scene");
-        let _ = engine.inspect(h).expect("inspect");
-    }
-    let load_ms = t0.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_load);
-
-    // 2. CPU 1280x720 rasterization (vello_cpu + text shaping)
-    let t1 = Instant::now();
-    let iters_raster = 10u64;
-    let mut last_rgba = Vec::new();
-    for f in 0..iters_raster {
-        let px = engine
-            .render_frame_at_with_index(handle, (f as f64) / 30.0, f as u32)
-            .expect("raster frame");
-        if last_rgba.is_empty() {
-            last_rgba = px.data_as_u8_slice().to_vec();
+    // 3. Animation sampling + taffy layout, without rasterization.
+    let mut clock = 0.0f64;
+    let layout_ms = bench_median_ms(2, 30, || {
+        let _ = engine.scene_at(heavy_handle, clock).expect("scene layout");
+        clock += 1.0 / 30.0;
+        if clock > 8.0 {
+            clock = 0.0;
         }
-    }
-    let raster_ms = t1.elapsed().as_secs_f64() * 1000.0 / (iters_raster as f64);
+    });
 
-    // 3. BT.709 16-bit fixed-point RGBA -> I420 + NV12 (1280x720)
-    let t2 = Instant::now();
-    let iters_color = 20u32;
-    for _ in 0..iters_color {
-        let _ = kine_server::rgba_to_i420_bench_shim(&last_rgba, 1280, 720);
-    }
-    let color_ms = t2.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_color);
+    // 4. CPU rasterization of the dense composition (vello_cpu, CPU WGSL VM off).
+    let mut frame = 0u32;
+    let raster_ms = bench_median_ms(1, 8, || {
+        let _ = engine
+            .render_frame_at_with_index(heavy_handle, (frame as f64) / 30.0, frame)
+            .expect("raster frame");
+        frame = frame.wrapping_add(1);
+    });
 
-    // 4. AV1 encode through FFmpeg (libsvtav1) + MP4 (av01) mux (12 frames)
-    let mut av1_opts = VideoOptions::default();
-    av1_opts.encoder = VideoEncoder::Av1Ffmpeg;
-    av1_opts.container = VideoContainer::Mp4;
-    av1_opts.frames = 12;
-    av1_opts.fps_num = 30;
-    av1_opts.quantizer = 120;
-    av1_opts.speed = 10;
-    let t3 = Instant::now();
-    let av1_report = kine_server::render_video(engine, handle, &av1_opts).ok();
-    let av1_total_ms = t3.elapsed().as_secs_f64() * 1000.0;
-    let av1_fps = (av1_opts.frames as f64) / (av1_total_ms / 1000.0).max(1e-6);
-    if av1_report.is_none() {
-        eprintln!("bench av1 unavailable: FFmpeg with an AV1 encoder was not found");
-    }
-    let (av1_latency, av1_throughput, av1_size) = match &av1_report {
-        Some(report) => (
-            format!("`{:.2} ms/frame`", av1_total_ms / (av1_opts.frames as f64)),
-            format!("`{av1_fps:.1} fps`"),
-            format!("`{} B`", report.bytes.len()),
-        ),
-        None => (
-            "`n/a`".to_string(),
-            "`n/a`".to_string(),
-            "`n/a`".to_string(),
-        ),
+    // 5. Full-frame WGSL post-processing chain through the CPU shader VM.
+    let shader_handle = match engine.load_scene_json(&bench_shader_scene_json()) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("bench shader scene load error: {e}");
+            return ExitCode::FAILURE;
+        }
     };
+    let mut shader_frame = 0u32;
+    let shader_ms = bench_median_ms(1, 6, || {
+        let _ = engine
+            .render_frame_at_with_index(shader_handle, (shader_frame as f64) / 30.0, shader_frame)
+            .expect("shader chain frame");
+        shader_frame = shader_frame.wrapping_add(1);
+    });
 
-    // 5. H.264 encode through FFmpeg (libopenh264) + MP4 (avc1) mux (12 frames)
-    let mut h264_opts = VideoOptions::default();
-    h264_opts.encoder = VideoEncoder::H264Ffmpeg;
-    h264_opts.container = VideoContainer::Mp4;
-    h264_opts.frames = 12;
-    h264_opts.fps_num = 30;
-    h264_opts.quantizer = 120;
-    h264_opts.speed = 10;
-    let t4 = Instant::now();
-    let h264_report = kine_server::render_video(engine, handle, &h264_opts).ok();
-    let h264_total_ms = t4.elapsed().as_secs_f64() * 1000.0;
-    let h264_fps = (h264_opts.frames as f64) / (h264_total_ms / 1000.0).max(1e-6);
-    if h264_report.is_none() {
-        eprintln!("bench h264 unavailable: FFmpeg with an H.264 encoder was not found");
-    }
-    let (h264_latency, h264_throughput, h264_size) = match &h264_report {
-        Some(report) => (
-            format!(
-                "`{:.2} ms/frame`",
-                h264_total_ms / (h264_opts.frames as f64)
-            ),
-            format!("`{h264_fps:.1} fps`"),
-            format!("`{} B`", report.bytes.len()),
-        ),
-        None => (
-            "`n/a`".to_string(),
-            "`n/a`".to_string(),
-            "`n/a`".to_string(),
-        ),
+    // 6. In-process PNG export (rasterization + Kine's own PNG encoder).
+    let png_bytes = match engine.render_frame_png(heavy_handle, 0) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("bench PNG export error: {e}");
+            return ExitCode::FAILURE;
+        }
     };
+    let png_ms = bench_median_ms(1, 5, || {
+        let _ = engine
+            .render_frame_png(heavy_handle, 0)
+            .expect("PNG export");
+    });
 
-    // 6. Headless StudioState agent tool dispatch (`studio_status` + `studio_transform`)
+    // 7. Audio DSP: synth 8 tracks, biquad EQ, compression, pan, fades and mix.
+    let audio_seconds = 12.0f64;
+    let audio_ms = bench_median_ms(1, 3, || {
+        let mix = bench_audio_mix(audio_seconds).expect("audio mix");
+        std::hint::black_box(mix.frame_count());
+    });
+
+    // 8. Headless Studio agent dispatch (bridge hot path, in-process).
     let mut studio = kine_session::StudioState::new(None);
     studio.engine.set_backend(RenderBackend::Cpu);
-    let t5 = Instant::now();
-    let iters_bridge = 20u32;
-    for _ in 0..iters_bridge {
-        let _ =
-            kine_session::dispatch_agent_tool(&mut studio, "studio_status", &serde_json::json!({}));
-    }
-    let bridge_ms = t5.elapsed().as_secs_f64() * 1000.0 / f64::from(iters_bridge);
+    let agent_ms = bench_median_ms(2, 60, || {
+        for tool in ["studio_status", "studio_tree", "studio_selection"] {
+            let _ = kine_session::dispatch_agent_tool(&mut studio, tool, &serde_json::json!({}));
+        }
+    });
+    let agent_us = agent_ms * 1000.0 / 3.0;
 
     let doc = engine.doctor();
+    let host = format!("`{}` (`{}`) · `cpu`", doc.platform, std::env::consts::ARCH);
+    let pixels = f64::from(BENCH_WIDTH) * f64::from(BENCH_HEIGHT);
+
     let md_table = format!(
-        "| Stage / Workload | Resolution / Spec | Avg Latency | Throughput | Output Size | Host / Config |\n\
-         | :--- | :--- | ---: | ---: | ---: | :--- |\n\
-         | **Scene Parse + Static Inspect** | 1280×720 AST | `{load_ms:.2} ms/op` | `{:.1} ops/s` | — | `{}` (`{}`) |\n\
-         | **CPU Frame Rasterization (`vello_cpu`)** | 1280×720 RGBA8 | `{raster_ms:.2} ms/frame` | `{:.1} fps` | `3,686,400 B` | `{}` |\n\
-         | **BT.709 Fixed-Point RGBA → I420** | 1280×720 4:2:0 | `{color_ms:.2} ms/frame` | `{:.1} fps` | `1,382,400 B` | `16-bit int + MT` |\n\
-         | **AV1 Encode + MP4 (`av01`)** | 1280×720 · 12f | {av1_latency} | {av1_throughput} | {av1_size} | `ffmpeg libsvtav1` |\n\
-         | **H.264 Encode + MP4 (`avc1`)** | 1280×720 · 12f | {h264_latency} | {h264_throughput} | {h264_size} | `ffmpeg libopenh264` |\n\
-         | **Headless Session Agent Tool (`studio_status`)** | `kine-session` | `{bridge_ms:.2} ms/call` | `{:.1} calls/s` | — | `in-process` |",
-        1000.0 / load_ms.max(1e-6),
-        doc.platform,
-        std::env::consts::ARCH,
+        "| Kine Subsystem | Benchmark Workload | Median Latency | Throughput | Detail | Host / Engine |\n\
+         | :--- | :--- | ---: | ---: | :--- | :--- |\n\
+         | **JSON scene compile** | {const_nodes} nodes · {BENCH_WIDTH}×{BENCH_HEIGHT} | `{compile_json_ms:.2} ms/op` | `{:.1} compiles/s` | serde → SceneDef → taffy | {host} |\n\
+         | **TypeScript scene compile** | {const_ts_nodes} nodes · {ts_kib:.0} KiB TS | `{compile_ts_ms:.2} ms/op` | `{:.1} compiles/s` | oxc → QuickJS → taffy | {host} |\n\
+         | **Animation + layout** | {const_nodes} nodes · 4 s sweep | `{layout_ms:.2} ms/frame` | `{:.1} layouts/s` | `apply_time` + `compute_layout` | {host} |\n\
+         | **CPU rasterization** | {const_nodes} nodes · {BENCH_WIDTH}×{BENCH_HEIGHT} | `{raster_ms:.2} ms/frame` | `{:.1} fps` | `{:.2} Mpix/frame` · `vello_cpu` | {host} |\n\
+         | **WGSL CPU VM post chain** | 3 full-frame passes · {BENCH_WIDTH}×{BENCH_HEIGHT} | `{shader_ms:.2} ms/frame` | `{:.1} fps` | `{:.2} Mpix/frame` · `naga` VM | {host} |\n\
+         | **PNG frame export** | {BENCH_WIDTH}×{BENCH_HEIGHT} RGBA8 | `{png_ms:.2} ms/frame` | `{:.1} fps` | `{:.0} KiB/frame` · in-process | {host} |\n\
+         | **Audio DSP mix** | 8 tracks · {audio_seconds:.0} s · 48 kHz stereo | `{audio_ms:.2} ms/mix` | `{:.1}× realtime` | synth + biquad EQ + compressor | {host} |\n\
+         | **Studio agent dispatch** | `studio_status` + tree + selection | `{agent_us:.1} µs/call` | `{:.1} calls/s` | in-process `kine-session` | {host} |",
+        1000.0 / compile_json_ms.max(1e-6),
+        1000.0 / compile_ts_ms.max(1e-6),
+        1000.0 / layout_ms.max(1e-6),
         1000.0 / raster_ms.max(1e-6),
-        doc.renderer,
-        1000.0 / color_ms.max(1e-6),
-        1000.0 / bridge_ms.max(1e-6),
+        pixels / 1e6,
+        1000.0 / shader_ms.max(1e-6),
+        pixels / 1e6,
+        1000.0 / png_ms.max(1e-6),
+        png_bytes.len() as f64 / 1024.0,
+        audio_seconds * 1000.0 / audio_ms.max(1e-6),
+        1_000_000.0 / agent_us.max(1e-6),
     );
 
     if let Some(readme_path) = flag("--update-readme") {
@@ -1150,21 +1396,71 @@ fn run_bench_cli(sub_args: &[String], engine: &mut Engine) -> ExitCode {
         let json_out = serde_json::json!({
             "platform": doc.platform,
             "arch": std::env::consts::ARCH,
-            "renderer": doc.renderer,
-            "scene_parse_inspect_ms": load_ms,
-            "cpu_raster_1280x720_ms": raster_ms,
-            "bt709_rgba_to_i420_ms": color_ms,
-            "av1_mp4_fps": av1_report.as_ref().map(|_| av1_fps),
-            "av1_mp4_bytes": av1_report.as_ref().map(|r| r.bytes.len()),
-            "h264_mp4_fps": h264_report.as_ref().map(|_| h264_fps),
-            "h264_mp4_bytes": h264_report.as_ref().map(|r| r.bytes.len()),
-            "session_agent_status_ms": bridge_ms,
+            "backend": "cpu",
+            "scene_compile_json_ms": compile_json_ms,
+            "scene_compile_typescript_ms": compile_ts_ms,
+            "animation_layout_ms": layout_ms,
+            "cpu_raster_1920x1080_ms": raster_ms,
+            "wgsl_cpu_chain_ms": shader_ms,
+            "png_export_ms": png_ms,
+            "png_bytes": png_bytes.len(),
+            "audio_mix_12s_ms": audio_ms,
+            "studio_agent_dispatch_us": agent_us,
             "markdown": md_table,
         });
         println!("{}", serde_json::to_string_pretty(&json_out).unwrap());
     }
 
     ExitCode::SUCCESS
+}
+
+/// Produce a 12-second, 8-track, 48 kHz stereo mix with per-track EQ, pan and
+/// compression — the Kine-side cost of a scored scene, with no external codec.
+fn bench_audio_mix(total_seconds: f64) -> Result<kine_audio::AudioClip, kine_audio::AudioError> {
+    let mut tracks = Vec::with_capacity(8);
+    for i in 0..8usize {
+        let waveform = match i % 4 {
+            0 => kine_audio::Waveform::Sine,
+            1 => kine_audio::Waveform::Triangle,
+            2 => kine_audio::Waveform::Saw,
+            _ => kine_audio::Waveform::PinkNoise,
+        };
+        let clip = kine_audio::synthesize(&kine_audio::SynthSpec {
+            waveform,
+            frequencies_hz: vec![110.0 * (i as f32 + 1.0), 220.0 * (i as f32 + 1.0)],
+            duration_seconds: total_seconds,
+            sample_rate: 48_000,
+            channels: 1,
+            gain: 0.12,
+            attack: 0.02,
+            release: 0.2,
+            ..Default::default()
+        })?;
+        let mut track = kine_audio::AudioTrackSpec::new(clip);
+        track.pan = -0.8 + (i as f32) * 0.22;
+        track.fade_in = 0.4;
+        track.fade_out = 0.6;
+        track.filters = vec![
+            kine_audio::BiquadFilterSpec::HighPass {
+                cutoff_hz: 60.0 + (i as f32) * 12.0,
+                q: 0.707,
+            },
+            kine_audio::BiquadFilterSpec::PeakingEq {
+                center_hz: 900.0 + (i as f32) * 140.0,
+                q: 1.1,
+                gain_db: 2.5,
+            },
+        ];
+        track.compressor = Some(kine_audio::CompressorSpec {
+            threshold_db: -20.0,
+            ratio: 3.5,
+            attack_ms: 8.0,
+            release_ms: 140.0,
+            makeup_db: 1.0,
+        });
+        tracks.push(track);
+    }
+    kine_audio::mix(&tracks, total_seconds, 48_000, 2)
 }
 
 fn run_agent_cli(sub_args: &[String], backend: RenderBackend) -> ExitCode {

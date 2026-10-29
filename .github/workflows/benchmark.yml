@@ -1,7 +1,11 @@
-name: Benchmark (Manual Only)
+name: Kine Engine Benchmark (Manual Only)
 
 # Triggered strictly via manual action (GitHub UI "Run workflow" or `gh workflow run benchmark.yml`).
 # Never runs automatically on push or pull_request.
+#
+# Measures Kine's own engine paths only (scene compile, layout, CPU raster,
+# WGSL CPU VM, PNG export, audio DSP, agent bridge dispatch). The external
+# FFmpeg codec is intentionally excluded — its speed is not a Kine metric.
 on:
   workflow_dispatch:
     inputs:
@@ -23,18 +27,14 @@ env:
 
 jobs:
   benchmark:
-    name: Run Pipeline Benchmark & Update README
+    name: Run Kine Engine Benchmark & Update README
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Install latest FFmpeg with AV1 and H.264 encoders
-        run: |
-          ./scripts/install-ffmpeg.sh
-          echo "KINE_FFMPEG=$GITHUB_WORKSPACE/.tools/ffmpeg/bin/ffmpeg" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -45,11 +45,13 @@ jobs:
       - name: Build headless kine-cli (--release, zero X11/Wayland packages)
         run: cargo build --release -p kine-cli
 
-      - name: Run benchmark and populate README.md table
+      - name: Run Kine engine benchmark and populate README.md table
         run: |
           ./target/release/kine bench --update-readme README.md | tee benchmark-table.md
           {
-            echo "## Kine Pipeline Benchmark Results"
+            echo "## Kine Engine Benchmark Results"
+            echo ""
+            echo "CPU backend, headless, no external codec in the measurement path."
             echo ""
             cat benchmark-table.md
           } >> "$GITHUB_STEP_SUMMARY"
@@ -67,7 +69,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet README.md; then
             git add README.md
-            git commit -m "docs(readme): update benchmark table from manual workflow_dispatch run"
+            git commit -m "docs(readme): update Kine engine benchmark table"
             git push
           else
             echo "README.md benchmark table is already up to date."
